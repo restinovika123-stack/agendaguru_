@@ -73,9 +73,76 @@ window.AGENDA_GURU_LOADED = true;
         if (sel && sel.value !== t) { if (![...sel.options].some(o => o.value === t)) populateTapelSelect(); sel.value = t; }
         const raporTapel = document.getElementById('rapor-tapel');
         if (raporTapel) raporTapel.value = t;
+        const ekskulTapel = document.getElementById('ekskul-tapel');
+        if (ekskulTapel) ekskulTapel.value = t;
+        updateTapelSelectStyle();
         const active = document.querySelector('.view-section.active');
         if (active) switchView(active.id.replace('view-', ''));
     }
+    // Pilihan TP diberi warna peringatan jika yang dibuka bukan TP berjalan,
+    // supaya guru sadar sedang mengisi data untuk tahun pelajaran lain.
+    function updateTapelSelectStyle() {
+        const el = document.getElementById('global-tapel'); if (!el) return;
+        const current = getDefaultTapel();
+        const other = getActiveTapel() !== current;
+        ['border-warning', 'bg-warning-subtle', 'text-warning-emphasis'].forEach(c => el.classList.toggle(c, other));
+        el.title = other
+            ? `Perhatian: Anda sedang membuka TP ${getActiveTapel()}, bukan TP berjalan (${current}).`
+            : 'Tahun Pelajaran aktif untuk absensi, nilai, dan rapor';
+    }
+
+    // --- Peringatan tanggal vs TP ---
+    // Saat guru mengisi tanggal di kolom absensi/nilai yang termasuk TP lain dari TP yang
+    // sedang dibuka, tampilkan peringatan dan tawarkan memindahkan data ke TP yang benar.
+    const tapelWarnDismissed = {};
+    function findTableRecordInTapel(kind, tapel) {
+        const same = r => String(r.TahunPelajaran || '').replace(/\s+/g, '') === String(tapel).replace(/\s+/g, '');
+        if (kind === 'absen') {
+            const cid = document.getElementById('absen-kelas').value, month = document.getElementById('absen-bulan').value;
+            return db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && same(a));
+        }
+        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value,
+            jenis = document.getElementById('nilai-jenis').value, bulan = document.getElementById('nilai-bulan').value;
+        if (jenis !== 'Formatif') return null;
+        return db.grades.find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) &&
+            String(g.Type) === 'Formatif' && String(g.MonthYear) === String(bulan) && same(g));
+    }
+    function moveTableToTapel(kind, from, to) {
+        const rec = findTableRecordInTapel(kind, from);
+        if (!rec) return;
+        if (findTableRecordInTapel(kind, to)) {
+            return Swal.fire('Tidak Bisa Dipindahkan', `TP ${to} sudah memiliki data untuk kelas dan bulan yang sama. Data di TP ${from} tidak diubah. Buka TP ${to} untuk memeriksanya.`, 'info');
+        }
+        rec.TahunPelajaran = to;
+        setActiveTapel(to);
+        syncDB();
+        Swal.fire({ icon: 'success', title: 'Dipindahkan', text: `Data dipindahkan ke TP ${to}.`, timer: 1800, showConfirmButton: false });
+    }
+    function warnTapelMismatch(kind, dateStr) {
+        const dateTapel = inferTapelFromDates([dateStr]);
+        const active = getActiveTapel();
+        if (!dateTapel || dateTapel === active || tapelWarnDismissed[active + '>' + dateTapel]) return;
+        const tgl = typeof formatTanggalIndo === 'function' ? formatTanggalIndo(dateStr) : dateStr;
+        Swal.fire({
+            icon: 'warning',
+            title: 'Tahun Pelajaran tidak cocok',
+            html: `Tanggal <b>${escapeHtml(tgl)}</b> termasuk <b>TP ${dateTapel}</b>, tetapi Anda sedang membuka <b>TP ${active}</b>.<br><br>` +
+                `Jika tetap di TP ${active}, data ini tidak akan muncul di rapor TP ${dateTapel}.`,
+            showCancelButton: true,
+            confirmButtonText: `Pindahkan ke TP ${dateTapel}`,
+            cancelButtonText: `Tetap di TP ${active}`
+        }).then(r => {
+            if (r.isConfirmed) moveTableToTapel(kind, active, dateTapel);
+            else tapelWarnDismissed[active + '>' + dateTapel] = true; // jangan tanya lagi di sesi ini
+        });
+    }
+    // Didaftarkan di document: berjalan SETELAH onchange kolom (yang menyimpan datanya lebih dulu)
+    document.addEventListener('change', e => {
+        const el = e.target;
+        if (!el || !el.classList || !el.value) return;
+        if (el.classList.contains('date-absen-col')) warnTapelMismatch('absen', el.value);
+        else if (el.classList.contains('date-nilai-col')) warnTapelMismatch('nilai', el.value);
+    });
     function inferTapelFromDates(datesData) {
         let dates = [];
         try { dates = typeof datesData === 'string' ? JSON.parse(datesData) : (datesData || []); } catch (e) { }
@@ -111,7 +178,45 @@ window.AGENDA_GURU_LOADED = true;
         const def = Number(getDefaultTapel().split('/')[0]);
         const years = new Set([active, `${def - 1}/${def}`, `${def}/${def + 1}`, `${def + 1}/${def + 2}`]);
         [...(db.attendance || []), ...(db.grades || [])].forEach(r => { if (/^\d{4}\/\d{4}$/.test(String(r.TahunPelajaran || ''))) years.add(String(r.TahunPelajaran)); });
-        el.innerHTML = [...years].sort().reverse().map(t => `<option value="${t}" ${t === active ? 'selected' : ''}>TP ${t}</option>`).join('');
+        getCustomTapels().forEach(t => years.add(t));
+        const current = getDefaultTapel();
+        el.innerHTML = [...years].sort().reverse().map(t => `<option value="${t}" ${t === active ? 'selected' : ''}>TP ${t}${t === current ? ' (berjalan)' : ''}</option>`).join('') +
+            '<option value="__add__">+ Tambah TP lain...</option>';
+        updateTapelSelectStyle();
+    }
+
+    // TP tambahan buatan guru disimpan di config (ikut tersinkron ke semua perangkat)
+    function normalizeTapel(v) {
+        const m = /^\s*(\d{4})\s*\/\s*(\d{4})\s*$/.exec(String(v || ''));
+        return m && Number(m[2]) === Number(m[1]) + 1 ? `${m[1]}/${m[2]}` : '';
+    }
+    function getCustomTapels() {
+        return String((db.config && db.config.customTapels) || '').split(',').map(normalizeTapel).filter(Boolean);
+    }
+    async function onTapelSelectChange(sel) {
+        if (sel.value !== '__add__') return setActiveTapel(sel.value);
+        sel.value = getActiveTapel(); // kembalikan pilihan selama dialog terbuka
+        const start = Number(getDefaultTapel().split('/')[0]) + 2;
+        const r = await Swal.fire({
+            title: 'Tambah Tahun Pelajaran',
+            input: 'text',
+            inputLabel: 'Format: TTTT/TTTT, contoh 2028/2029',
+            inputValue: `${start}/${start + 1}`,
+            showCancelButton: true, confirmButtonText: 'Tambah & Buka', cancelButtonText: 'Batal',
+            inputValidator: v => {
+                if (!/^\s*\d{4}\s*\/\s*\d{4}\s*$/.test(v || '')) return 'Gunakan format TTTT/TTTT, contoh 2028/2029';
+                if (!normalizeTapel(v)) return 'Tahun kedua harus satu tahun setelah tahun pertama (contoh 2028/2029)';
+                const y = Number(String(v).trim().slice(0, 4));
+                if (y < 2000 || y > 2100) return 'Tahun di luar rentang yang wajar';
+            }
+        });
+        if (!r.isConfirmed) return;
+        const t = normalizeTapel(r.value);
+        const list = getCustomTapels();
+        if (!list.includes(t)) { list.push(t); db.config.customTapels = list.join(','); syncDB(); }
+        try { localStorage.setItem('agendaGuru_activeTapel', t); } catch (e) { }
+        populateTapelSelect();
+        setActiveTapel(t);
     }
 
     // --- Core Sync Logic ---
@@ -4064,7 +4169,7 @@ window.AGENDA_GURU_LOADED = true;
         const academicYear = curMonth >= 7 ? `${curYear}/${curYear + 1}` : `${curYear - 1}/${curYear}`;
         const defaultSem = curMonth >= 7 ? 'ganjil' : 'genap';
         if (document.getElementById('ekskul-tapel') && !document.getElementById('ekskul-tapel').value) {
-            document.getElementById('ekskul-tapel').value = academicYear || getActiveTapel();
+            document.getElementById('ekskul-tapel').value = getActiveTapel(); // ikut TP yang dipilih di atas
         }
         if (document.getElementById('ekskul-semester') && !document.getElementById('ekskul-semester').value) {
             document.getElementById('ekskul-semester').value = defaultSem;
