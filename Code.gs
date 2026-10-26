@@ -11,7 +11,7 @@
  * ===================================================================== */
 
 // ---- PENGATURAN PEMILIK APLIKASI (isi sekali sebelum file ini dibagikan) ----
-const FRONTEND_URL = 'https://restinovika123-stack.github.io/agendaguru/';
+const FRONTEND_URL = 'https://restinovika123-stack.github.io/agendaguru_/';
 // Naikkan angka ini jika fungsi API berubah, supaya frontend bisa memberi tahu guru
 // yang masih memakai Code.gs lama untuk memperbaruinya.
 const API_VERSION = 1;
