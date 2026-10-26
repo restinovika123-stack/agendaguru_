@@ -58,6 +58,10 @@ Sheet database dibuat otomatis saat pertama dipakai.
 
 Tips: usahakan perubahan fitur hanya di frontend, supaya guru tidak perlu memperbarui Code.gs.
 
+**Code.gs versi 2 (wajib untuk menu Pengolah Nilai):** sejak versi ini, setiap jenis data baru dari
+frontend otomatis disimpan ke sheet berawalan `X_` (misalnya `X_nilaiAkhir`). Jadi fitur baru
+berikutnya umumnya tidak perlu memperbarui Code.gs lagi.
+
 ## D. (Opsional) Unggah dengan git
 
 ```

@@ -562,6 +562,7 @@ window.AGENDA_GURU_LOADED = true;
             if (!db.poin) db.poin = [];
             if (!db.ekskul) db.ekskul = [];
             if (!db.raporNotes) db.raporNotes = [];
+            if (!db.nilaiAkhir) db.nilaiAkhir = []; // hasil Pengolah Nilai
             if (!db.students) db.students = [];
 
             // Pastikan atribut identitas siswa selalu terdefinisi dengan aman (dan bertipe teks)
@@ -748,7 +749,7 @@ window.AGENDA_GURU_LOADED = true;
         const activeLink = document.querySelector(`.nav-link[onclick*="switchView('${viewId}')"]`);
         if (activeLink) activeLink.classList.add('active');
 
-        let titles = { beranda: "Beranda", kelas: "Manajemen Kelas", absensi: "Absensi Siswa", nilai: "Data Nilai", kokurikuler: "Nilai Kokurikuler", ekstrakurikuler: "Nilai Ekstrakurikuler", jurnal: "Jurnal Harian", jadwal: "Jadwal Pelajaran", poin: "Poin Siswa", rapor: "Cetak Rapor Siswa" };
+        let titles = { beranda: "Beranda", kelas: "Manajemen Kelas", absensi: "Absensi Siswa", nilai: "Data Nilai", kokurikuler: "Nilai Kokurikuler", ekstrakurikuler: "Nilai Ekstrakurikuler", jurnal: "Jurnal Harian", jadwal: "Jadwal Pelajaran", poin: "Poin Siswa", pengolah: "Pengolah Nilai", rapor: "Cetak Rapor Siswa", rekap: "Rekap Laporan" };
         document.getElementById('topbar-title').innerText = titles[viewId] || "AgendaGuru";
 
         if (viewId === 'beranda') renderBeranda();
@@ -761,6 +762,8 @@ window.AGENDA_GURU_LOADED = true;
         if (viewId === 'jadwal') renderSchedule();
         if (viewId === 'poin') { switchPoinTab('input'); loadPoinData(); if (document.getElementById('poin-tanggal')) document.getElementById('poin-tanggal').value = new Date().toISOString().split('T')[0]; }
         if (viewId === 'rapor') loadRaporViewData();
+        if (viewId === 'pengolah') loadPengolahView();
+        if (viewId === 'rekap') loadRekapView();
 
         if (window.innerWidth < 992) { document.getElementById('sidebar-menu').classList.remove('show'); document.getElementById('sidebar-overlay').classList.remove('show'); }
     }
@@ -3222,7 +3225,9 @@ window.AGENDA_GURU_LOADED = true;
                 } catch (e) { }
             }
 
-            const hasAnyScore = countF > 0 || hasPts || hasPas;
+            // Nilai akhir dari menu Pengolah Nilai (jika sudah disimpan) menggantikan rata-rata biasa
+            const nilaiOlahan = typeof getNilaiOlahanSiswa === 'function' ? getNilaiOlahanSiswa(cid, subj, semester, tapel, studentId) : null;
+            const hasAnyScore = countF > 0 || hasPts || hasPas || nilaiOlahan !== null;
             let finalScore = null;
             let capaian = '';
 
@@ -3233,6 +3238,7 @@ window.AGENDA_GURU_LOADED = true;
                 if (hasPts) { total += pts; divisor++; }
                 if (hasPas) { total += pas; divisor++; }
                 finalScore = divisor > 0 ? Math.round((total / divisor) * 10) / 10 : null;
+                if (nilaiOlahan !== null) finalScore = nilaiOlahan;
 
                 // Ambil Tujuan Pembelajaran (TP) yang sesuai dengan mata pelajaran dan semester rapor saat ini
                 let tps = db.tpBank.filter(t => 
@@ -6776,4 +6782,465 @@ window.AGENDA_GURU_LOADED = true;
             btnSend.innerHTML = `<i class="bi bi-check2-all"></i> Selesai`;
             btnSend.classList.replace('btn-success', 'btn-secondary');
         }
+    }
+
+    // =====================================================================
+    // PENGOLAH NILAI
+    // Mengolah nilai harian (formatif), PTS (SumatifLM), PAS (SumatifAS), dan
+    // kehadiran menjadi nilai akhir rapor dengan bobot, KKM, dan penyesuaian.
+    // Hasil disimpan di db.nilaiAkhir (sheet "X_nilaiAkhir") dan otomatis
+    // dipakai sebagai nilai akhir di Cetak Rapor & Rekap Laporan.
+    // =====================================================================
+    const PN_DEFAULT = { bobot: { harian: 40, pts: 30, pas: 30, hadir: 0 }, kkm: 75, bulat: true, metode: 'none', rentangMin: 75, rentangMax: 80 };
+    const PN_SETTINGS_KEY = 'agendaGuru_pnSettings';
+    let pnRows = [];          // hasil hitung terakhir per siswa
+    let pnSemesterTouched = false;
+
+    function pnNum(v) { if (v === '' || v === null || v === undefined) return null; const n = parseFloat(v); return isNaN(n) ? null : n; }
+    function pnFmt(v) { return v === null || v === undefined ? '-' : (Math.round(v * 10) / 10).toString().replace('.', ','); }
+    function pnSameTapel(a, b) { return String(a || '').replace(/\s+/g, '') === String(b || '').replace(/\s+/g, ''); }
+
+    // Komponen nilai mentah satu siswa (cara mengambil datanya sama dengan perhitungan rapor)
+    function getNilaiKomponen(cid, sid, subj, semester, tapel) {
+        const months = semester === 'ganjil' ? ['07', '08', '09', '10', '11', '12'] : ['01', '02', '03', '04', '05', '06'];
+        let sum = 0, count = 0;
+        months.forEach(m => {
+            const rec = db.grades.find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(subj) && String(g.Type) === 'Formatif' && String(g.MonthYear) === String(m) && matchTapel(g, tapel));
+            if (!rec || !rec.GradesData) return;
+            try { (JSON.parse(rec.GradesData)[sid] || []).forEach(v => { const n = pnNum(v); if (n !== null) { sum += n; count++; } }); } catch (e) { }
+        });
+        const single = type => {
+            const rec = db.grades.slice().reverse().find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(subj) && String(g.Type) === type && isGradeMatchingSemester(g, semester) && matchTapel(g, tapel));
+            if (!rec) return null;
+            try { return pnNum((JSON.parse(rec.GradesData)[sid] || [])[0]); } catch (e) { return null; }
+        };
+        const att = getStudentAttendanceSummary(cid, sid, semester, tapel);
+        const totalAtt = att.H + att.S + att.I + att.A;
+        return {
+            harian: count > 0 ? sum / count : null,
+            pts: single('SumatifLM'),
+            pas: single('SumatifAS'),
+            hadir: totalAtt > 0 ? (att.H / totalAtt) * 100 : null
+        };
+    }
+
+    function findNilaiOlahan(cid, subj, semester, tapel) {
+        return (db.nilaiAkhir || []).find(r => String(r.ClassID) === String(cid) && String(r.Subject) === String(subj) &&
+            String(r.Semester || '').toLowerCase() === String(semester || '').toLowerCase() && pnSameTapel(r.TahunPelajaran, tapel));
+    }
+    function parseNilaiData(rec) {
+        try { return typeof rec.NilaiData === 'string' ? JSON.parse(rec.NilaiData || '{}') : (rec.NilaiData || {}); } catch (e) { return {}; }
+    }
+    // Nilai akhir hasil Pengolah Nilai untuk satu siswa (null jika belum diolah)
+    function getNilaiOlahanSiswa(cid, subj, semester, tapel, sid) {
+        if (!db.nilaiAkhir || db.nilaiAkhir.length === 0) return null;
+        const rec = findNilaiOlahan(cid, subj, semester, tapel || getActiveTapel());
+        if (!rec) return null;
+        const d = parseNilaiData(rec)[sid];
+        return d ? pnNum(d.akhir) : null;
+    }
+
+    function pnReadSettings() {
+        const n = (id, def) => { const v = pnNum(document.getElementById(id)?.value); return v === null ? def : v; };
+        return {
+            bobot: { harian: n('pn-bobot-harian', 0), pts: n('pn-bobot-pts', 0), pas: n('pn-bobot-pas', 0), hadir: n('pn-bobot-hadir', 0) },
+            kkm: n('pn-kkm', 75),
+            bulat: !!document.getElementById('pn-bulat')?.checked,
+            metode: document.getElementById('pn-metode')?.value || 'none',
+            rentangMin: n('pn-rentang-min', 75),
+            rentangMax: n('pn-rentang-max', 80)
+        };
+    }
+    function pnApplySettings(s) {
+        s = Object.assign({}, PN_DEFAULT, s || {});
+        s.bobot = Object.assign({}, PN_DEFAULT.bobot, s.bobot || {});
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        set('pn-bobot-harian', s.bobot.harian); set('pn-bobot-pts', s.bobot.pts); set('pn-bobot-pas', s.bobot.pas); set('pn-bobot-hadir', s.bobot.hadir);
+        set('pn-kkm', s.kkm); set('pn-metode', s.metode); set('pn-rentang-min', s.rentangMin); set('pn-rentang-max', s.rentangMax);
+        const b = document.getElementById('pn-bulat'); if (b) b.checked = !!s.bulat;
+        pnUpdateSettingUI();
+    }
+    function pnLastSettings() {
+        try { return JSON.parse(localStorage.getItem(PN_SETTINGS_KEY) || 'null') || PN_DEFAULT; } catch (e) { return PN_DEFAULT; }
+    }
+    function pnUpdateSettingUI() {
+        const s = pnReadSettings();
+        const total = s.bobot.harian + s.bobot.pts + s.bobot.pas + s.bobot.hadir;
+        const totEl = document.getElementById('pn-bobot-total');
+        if (totEl) totEl.innerHTML = total === 100
+            ? '<span class="text-success fw-semibold"><i class="bi bi-check-circle me-1"></i>Total bobot 100%</span>'
+            : `<span class="text-danger fw-semibold"><i class="bi bi-exclamation-circle me-1"></i>Total bobot ${total}% (harus 100%)</span>`;
+        const showRange = s.metode !== 'none';
+        ['pn-rentang-wrap-min', 'pn-rentang-wrap-max'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = showRange ? '' : 'none'; });
+        const help = document.getElementById('pn-metode-help');
+        if (help) help.textContent = s.metode === 'kkm'
+            ? `Nilai di bawah KKM (${s.kkm}) dipetakan berurutan ke rentang ${s.rentangMin}–${s.rentangMax}. Nilai yang sudah mencapai KKM tidak diubah.`
+            : s.metode === 'rentang'
+                ? `Nilai terendah di kelas menjadi ${s.rentangMin} dan tertinggi menjadi ${s.rentangMax}; nilai lain menyesuaikan secara proporsional.`
+                : 'Nilai akhir = nilai mentah hasil pembobotan.';
+    }
+
+    function pnSelection() {
+        return {
+            cid: document.getElementById('pn-kelas')?.value || '',
+            subj: document.getElementById('pn-mapel')?.value || '',
+            sem: document.getElementById('pn-semester')?.value || 'ganjil',
+            tapel: getActiveTapel()
+        };
+    }
+
+    function loadPengolahView() {
+        const elK = document.getElementById('pn-kelas'), elM = document.getElementById('pn-mapel');
+        if (!elK || !elM) return;
+        const curK = elK.value, curM = elM.value;
+        elK.innerHTML = '<option value="">-- Pilih Kelas --</option>' + db.classes.map(c => `<option value="${escapeHtml(c.ClassID)}">${escapeHtml(c.ClassName)}</option>`).join('');
+        if (curK && db.classes.some(c => String(c.ClassID) === String(curK))) elK.value = curK;
+        else if (db.classes.length === 1) elK.value = db.classes[0].ClassID;
+        const subjects = [...(db.subjects || [])];
+        db.grades.forEach(g => { if (g.Subject && !subjects.includes(g.Subject)) subjects.push(g.Subject); });
+        elM.innerHTML = '<option value="">-- Pilih Mapel --</option>' + subjects.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+        if (curM && subjects.includes(curM)) elM.value = curM;
+        if (!pnSemesterTouched) {
+            const t = getActiveTapel(), now = new Date();
+            document.getElementById('pn-semester').value = (t === getDefaultTapel() && now.getMonth() + 1 < 7) ? 'genap' : 'ganjil';
+        }
+        const lbl = document.getElementById('pn-tapel-label'); if (lbl) lbl.textContent = 'TP ' + getActiveTapel();
+        loadPengolahNilai();
+    }
+
+    // Dipanggil saat kelas/mapel/semester berubah: pakai pengaturan tersimpan jika ada
+    function loadPengolahNilai() {
+        const { cid, subj, sem, tapel } = pnSelection();
+        const rec = cid && subj ? findNilaiOlahan(cid, subj, sem, tapel) : null;
+        let saved = null;
+        if (rec) { try { saved = JSON.parse(rec.Pengaturan || 'null'); } catch (e) { } }
+        pnApplySettings(saved || pnLastSettings());
+        hitungPengolahNilai(true);
+        if (rec) {
+            // Tampilkan nilai akhir yang tersimpan apa adanya
+            const data = parseNilaiData(rec);
+            let changed = 0;
+            pnRows.forEach(r => {
+                const d = data[r.sid];
+                if (!d) return;
+                const savedAkhir = pnNum(d.akhir);
+                if (savedAkhir !== r.akhir) { r.akhir = savedAkhir; r.manual = !!d.manual; if (!d.manual) changed++; }
+                else if (d.manual) r.manual = true;
+            });
+            renderPengolahTable();
+            pnSetStatus(rec, changed);
+        } else {
+            pnSetStatus(null, 0);
+        }
+    }
+
+    function pnSetStatus(rec, staleCount) {
+        const el = document.getElementById('pn-status-badge');
+        const btnDel = document.getElementById('pn-btn-hapus');
+        if (btnDel) btnDel.disabled = !rec;
+        if (!el) return;
+        const { cid, subj } = pnSelection();
+        if (!cid || !subj) { el.className = 'badge rounded-pill bg-secondary-subtle text-secondary-emphasis px-3 py-2'; el.textContent = 'Pilih kelas & mapel'; return; }
+        if (!rec) { el.className = 'badge rounded-pill bg-warning-subtle text-warning-emphasis px-3 py-2'; el.textContent = 'Belum disimpan – rapor memakai rata-rata biasa'; return; }
+        const t = rec.UpdatedAt ? new Date(rec.UpdatedAt) : null;
+        const when = t && !isNaN(t) ? t.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+        el.className = 'badge rounded-pill bg-success-subtle text-success-emphasis px-3 py-2';
+        el.textContent = 'Tersimpan di rapor' + (when ? ' · ' + when : '');
+        if (staleCount > 0) {
+            el.className = 'badge rounded-pill bg-info-subtle text-info-emphasis px-3 py-2';
+            el.textContent = `Tersimpan · ${staleCount} nilai berubah sejak disimpan, klik Hitung Ulang lalu Simpan`;
+        }
+    }
+
+    // Hitung nilai mentah & nilai akhir. resetManual=false mempertahankan ubahan manual guru.
+    function hitungPengolahNilai(resetManual) {
+        const { cid, subj, sem, tapel } = pnSelection();
+        const tbody = document.getElementById('pn-tbody');
+        if (!cid || !subj) {
+            pnRows = [];
+            if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Pilih kelas dan mata pelajaran terlebih dahulu.</td></tr>';
+            const st = document.getElementById('pn-stats'); if (st) st.innerHTML = '';
+            pnSetStatus(null, 0);
+            return;
+        }
+        const s = pnReadSettings();
+        const keepManual = {};
+        if (!resetManual) pnRows.forEach(r => { if (r.manual) keepManual[r.sid] = r.akhir; });
+
+        const students = db.students.filter(st => String(st.ClassID) === String(cid));
+        pnRows = students.map(st => {
+            const k = getNilaiKomponen(cid, st.StudentID, subj, sem, tapel);
+            const parts = ['harian', 'pts', 'pas', 'hadir'].filter(key => k[key] !== null && s.bobot[key] > 0);
+            const wsum = parts.reduce((a, key) => a + s.bobot[key], 0);
+            const mentah = wsum > 0 ? parts.reduce((a, key) => a + k[key] * s.bobot[key], 0) / wsum : null;
+            return { sid: st.StudentID, name: st.StudentName, nis: st.NIS || '', harian: k.harian, pts: k.pts, pas: k.pas, hadir: k.hadir, mentah, akhir: null, manual: false };
+        });
+
+        const valid = pnRows.filter(r => r.mentah !== null);
+        const lo = arr => Math.min(...arr), hi = arr => Math.max(...arr);
+        if (s.metode === 'kkm') {
+            const below = valid.filter(r => r.mentah < s.kkm).map(r => r.mentah);
+            const bLo = below.length ? lo(below) : 0, bHi = below.length ? hi(below) : 0;
+            pnRows.forEach(r => {
+                if (r.mentah === null) return;
+                if (r.mentah >= s.kkm) { r.akhir = r.mentah; return; }
+                r.akhir = bHi > bLo ? s.rentangMin + (r.mentah - bLo) / (bHi - bLo) * (s.rentangMax - s.rentangMin) : s.rentangMin;
+            });
+        } else if (s.metode === 'rentang') {
+            const vals = valid.map(r => r.mentah);
+            const aLo = vals.length ? lo(vals) : 0, aHi = vals.length ? hi(vals) : 0;
+            pnRows.forEach(r => {
+                if (r.mentah === null) return;
+                r.akhir = aHi > aLo ? s.rentangMin + (r.mentah - aLo) / (aHi - aLo) * (s.rentangMax - s.rentangMin) : Math.min(s.rentangMax, Math.max(s.rentangMin, r.mentah));
+            });
+        } else {
+            pnRows.forEach(r => { r.akhir = r.mentah; });
+        }
+        pnRows.forEach(r => {
+            if (r.akhir !== null) {
+                r.akhir = Math.min(100, Math.max(0, r.akhir));
+                r.akhir = s.bulat ? Math.round(r.akhir) : Math.round(r.akhir * 10) / 10;
+            }
+            if (Object.prototype.hasOwnProperty.call(keepManual, r.sid)) { r.akhir = keepManual[r.sid]; r.manual = true; }
+        });
+        renderPengolahTable();
+    }
+
+    function renderPengolahTable() {
+        const tbody = document.getElementById('pn-tbody');
+        if (!tbody) return;
+        const s = pnReadSettings();
+        if (pnRows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Belum ada siswa di kelas ini.</td></tr>';
+        } else {
+            tbody.innerHTML = pnRows.map((r, i) => {
+                const rounded = r.mentah === null ? null : (s.bulat ? Math.round(r.mentah) : Math.round(r.mentah * 10) / 10);
+                const adjusted = r.akhir !== null && rounded !== null && r.akhir !== rounded;
+                let ket = '<span class="text-muted small">Belum ada nilai</span>';
+                if (r.akhir !== null) {
+                    ket = r.akhir >= s.kkm ? '<span class="badge bg-success-subtle text-success-emphasis">Tuntas</span>' : '<span class="badge bg-danger-subtle text-danger-emphasis">Belum tuntas</span>';
+                    if (r.manual) ket += ' <span class="badge bg-secondary-subtle text-secondary-emphasis" title="Diubah manual">manual</span>';
+                    else if (adjusted) ket += ' <span class="badge bg-info-subtle text-info-emphasis" title="Disesuaikan dari nilai mentah">disesuaikan</span>';
+                }
+                return `<tr class="text-center">
+                    <td>${i + 1}</td>
+                    <td class="text-start fw-semibold">${escapeHtml(r.name)}</td>
+                    <td>${pnFmt(r.harian)}</td><td>${pnFmt(r.pts)}</td><td>${pnFmt(r.pas)}</td><td>${pnFmt(r.hadir)}</td>
+                    <td>${pnFmt(r.mentah)}</td>
+                    <td><input type="number" min="0" max="100" step="0.1" class="form-control form-control-sm text-center fw-bold pn-akhir" data-sid="${escapeHtml(r.sid)}" value="${r.akhir === null ? '' : r.akhir}" aria-label="Nilai akhir ${escapeHtml(r.name)}"></td>
+                    <td class="text-nowrap">${ket}</td></tr>`;
+            }).join('');
+        }
+        renderPengolahStats();
+    }
+
+    function renderPengolahStats() {
+        const el = document.getElementById('pn-stats'); if (!el) return;
+        const s = pnReadSettings();
+        const vals = pnRows.map(r => r.akhir).filter(v => v !== null);
+        const card = (label, value, cls) => `<div class="col-6 col-md-3"><div class="p-2 rounded-3 border text-center ${cls || ''}"><div class="small text-muted">${label}</div><div class="fs-5 fw-bold">${value}</div></div></div>`;
+        if (vals.length === 0) { el.innerHTML = card('Siswa dinilai', `0 / ${pnRows.length}`); return; }
+        const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const tuntas = vals.filter(v => v >= s.kkm).length;
+        el.innerHTML = card('Rata-rata kelas', pnFmt(avg)) + card('Tertinggi', pnFmt(Math.max(...vals))) + card('Terendah', pnFmt(Math.min(...vals))) +
+            card('Tuntas (≥ KKM)', `${tuntas} / ${vals.length}`, tuntas === vals.length ? 'bg-success-subtle' : '');
+    }
+
+    // Ubahan pengaturan -> hitung ulang (ubahan manual guru dipertahankan)
+    document.addEventListener('input', e => {
+        const el = e.target;
+        if (!el || !el.classList) return;
+        if (el.classList.contains('pn-akhir')) {
+            const row = pnRows.find(r => String(r.sid) === String(el.dataset.sid));
+            if (row) { row.akhir = el.value === '' ? null : Math.min(100, Math.max(0, pnNum(el.value) ?? 0)); row.manual = true; renderPengolahStats(); }
+            return;
+        }
+        if (el.classList.contains('pn-setting') && el.id !== 'pn-metode' && el.type !== 'checkbox') { pnUpdateSettingUI(); hitungPengolahNilai(false); }
+    });
+    document.addEventListener('change', e => {
+        const el = e.target;
+        if (!el) return;
+        if (el.classList && el.classList.contains('pn-akhir')) { renderPengolahTable(); return; }
+        if (el.id === 'pn-semester') pnSemesterTouched = true;
+        if (el.id === 'pn-metode') {
+            const kkm = pnNum(document.getElementById('pn-kkm').value) ?? 75;
+            if (el.value === 'kkm') { document.getElementById('pn-rentang-min').value = kkm; document.getElementById('pn-rentang-max').value = Math.min(100, kkm + 5); }
+            if (el.value === 'rentang') { document.getElementById('pn-rentang-min').value = kkm; document.getElementById('pn-rentang-max').value = 95; }
+        }
+        if (el.classList && el.classList.contains('pn-setting') && (el.id === 'pn-metode' || el.type === 'checkbox')) { pnUpdateSettingUI(); hitungPengolahNilai(false); }
+    });
+
+    function pnServerTooOld() {
+        return IS_GAS && window.AGENDA_SERVER_INFO && Number(window.AGENDA_SERVER_INFO.apiVersion || 0) < 2;
+    }
+
+    function simpanPengolahNilai() {
+        const { cid, subj, sem, tapel } = pnSelection();
+        if (!cid || !subj) return Swal.fire('Pilih Data', 'Pilih kelas dan mata pelajaran terlebih dahulu.', 'warning');
+        const s = pnReadSettings();
+        const total = s.bobot.harian + s.bobot.pts + s.bobot.pas + s.bobot.hadir;
+        if (total !== 100) return Swal.fire('Bobot Belum 100%', `Total bobot saat ini ${total}%. Sesuaikan agar totalnya tepat 100%.`, 'warning');
+        if (s.metode !== 'none' && s.rentangMin > s.rentangMax) return Swal.fire('Rentang Tidak Valid', 'Batas bawah tidak boleh lebih besar dari batas atas.', 'warning');
+        if (!pnRows.some(r => r.akhir !== null)) return Swal.fire('Belum Ada Nilai', 'Belum ada siswa yang memiliki nilai pada mapel dan semester ini.', 'info');
+        if (pnServerTooOld()) {
+            return Swal.fire({ icon: 'warning', title: 'Perbarui Code.gs', html: 'Fitur Pengolah Nilai butuh <b>Code.gs versi terbaru</b> agar hasilnya tersimpan di Spreadsheet.<br><br>Salin Code.gs terbaru ke Apps Script, lalu <b>Terapkan → Kelola deployment → Edit → Versi baru</b>.' });
+        }
+        const data = {};
+        pnRows.forEach(r => {
+            data[r.sid] = { harian: r.harian === null ? '' : Math.round(r.harian * 10) / 10, pts: r.pts ?? '', pas: r.pas ?? '', hadir: r.hadir === null ? '' : Math.round(r.hadir * 10) / 10,
+                mentah: r.mentah === null ? '' : Math.round(r.mentah * 10) / 10, akhir: r.akhir ?? '', manual: !!r.manual };
+        });
+        if (!db.nilaiAkhir) db.nilaiAkhir = [];
+        let rec = findNilaiOlahan(cid, subj, sem, tapel);
+        if (!rec) { rec = { RecordID: 'NA' + Date.now(), ClassID: cid, Subject: subj, Semester: sem, TahunPelajaran: tapel }; db.nilaiAkhir.push(rec); }
+        rec.Pengaturan = JSON.stringify(s);
+        rec.NilaiData = JSON.stringify(data);
+        rec.UpdatedAt = new Date().toISOString();
+        try { localStorage.setItem(PN_SETTINGS_KEY, JSON.stringify(s)); } catch (e) { }
+        syncDB();
+        pnSetStatus(rec, 0);
+        Swal.fire({ icon: 'success', title: 'Nilai Akhir Tersimpan', text: `Nilai akhir ${subj} otomatis dipakai di Cetak Rapor dan Rekap Laporan.`, timer: 2200, showConfirmButton: false });
+    }
+
+    function hapusPengolahNilai() {
+        const { cid, subj, sem, tapel } = pnSelection();
+        const rec = cid && subj ? findNilaiOlahan(cid, subj, sem, tapel) : null;
+        if (!rec) return;
+        Swal.fire({
+            icon: 'warning', title: 'Hapus hasil pengolahan?', text: `Rapor ${subj} akan kembali memakai rata-rata biasa (harian, PTS, PAS). Data nilai asli tidak terhapus.`,
+            showCancelButton: true, confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal', confirmButtonColor: '#C44747'
+        }).then(r => {
+            if (!r.isConfirmed) return;
+            db.nilaiAkhir = db.nilaiAkhir.filter(x => x !== rec);
+            syncDB();
+            loadPengolahNilai();
+            Swal.fire({ icon: 'success', title: 'Dihapus', timer: 1500, showConfirmButton: false });
+        });
+    }
+
+    function pnSafeName(s) { return String(s || '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_'); }
+    function pnKelasName(cid) { return db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid; }
+    function pnMetodeText(s) {
+        return s.metode === 'kkm' ? `Nilai < KKM disesuaikan ke ${s.rentangMin}-${s.rentangMax}` : s.metode === 'rentang' ? `Konversi ke rentang ${s.rentangMin}-${s.rentangMax}` : 'Tanpa penyesuaian';
+    }
+
+    async function downloadPengolahExcel() {
+        const { cid, subj, sem, tapel } = pnSelection();
+        if (!cid || !subj || pnRows.length === 0) return Swal.fire('Pilih Data', 'Pilih kelas dan mata pelajaran yang memiliki siswa.', 'warning');
+        await ensureXLSX();
+        const s = pnReadSettings();
+        const v = x => x === null || x === undefined ? '' : Math.round(x * 10) / 10;
+        const aoa = [
+            ['PENGOLAHAN NILAI AKHIR'],
+            ['Sekolah', db.config.userSchool || ''], ['Kelas', pnKelasName(cid)], ['Mata Pelajaran', subj],
+            ['Semester', sem === 'ganjil' ? '1 (Ganjil)' : '2 (Genap)'], ['Tahun Pelajaran', tapel],
+            ['Bobot', `Harian ${s.bobot.harian}% | PTS ${s.bobot.pts}% | PAS ${s.bobot.pas}% | Kehadiran ${s.bobot.hadir}%`],
+            ['KKM', s.kkm], ['Penyesuaian', pnMetodeText(s)], [],
+            ['No', 'NIS', 'Nama Siswa', 'Harian', 'PTS', 'PAS', 'Hadir (%)', 'Nilai Mentah', 'Nilai Akhir', 'Keterangan']
+        ];
+        pnRows.forEach((r, i) => aoa.push([i + 1, r.nis, r.name, v(r.harian), v(r.pts), v(r.pas), v(r.hadir), v(r.mentah), r.akhir ?? '', r.akhir === null ? '' : (r.akhir >= s.kkm ? 'Tuntas' : 'Belum tuntas')]));
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = [{ wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 10 }, { wch: 13 }, { wch: 11 }, { wch: 14 }];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Pengolahan Nilai');
+        XLSX.writeFile(wb, `PengolahNilai_${pnSafeName(pnKelasName(cid))}_${pnSafeName(subj)}_${sem}_${pnSafeName(tapel)}.xlsx`);
+    }
+
+    // =====================================================================
+    // REKAP LAPORAN (Excel): leger nilai akhir, kehadiran, dan detail pengolahan
+    // =====================================================================
+    function loadRekapView() {
+        const el = document.getElementById('rekap-kelas'); if (!el) return;
+        const cur = el.value;
+        el.innerHTML = '<option value="">-- Pilih Kelas --</option>' + db.classes.map(c => `<option value="${escapeHtml(c.ClassID)}">${escapeHtml(c.ClassName)}</option>`).join('');
+        if (cur && db.classes.some(c => String(c.ClassID) === String(cur))) el.value = cur;
+        else if (db.classes.length === 1) el.value = db.classes[0].ClassID;
+        const semEl = document.getElementById('rekap-semester');
+        if (semEl && !semEl.dataset.touched) {
+            semEl.value = (getActiveTapel() === getDefaultTapel() && new Date().getMonth() + 1 < 7) ? 'genap' : 'ganjil';
+            semEl.addEventListener('change', () => { semEl.dataset.touched = '1'; }, { once: true });
+        }
+        const lbl = document.getElementById('rekap-tapel-label'); if (lbl) lbl.textContent = getActiveTapel();
+        renderRekapLaporan();
+    }
+
+    function buildRekapData(cid, sem, tapel) {
+        const students = db.students.filter(s => String(s.ClassID) === String(cid));
+        const perStudent = students.map(st => {
+            const grades = getStudentAllGrades(cid, st.StudentID, sem, tapel);
+            const att = getStudentAttendanceSummary(cid, st.StudentID, sem, tapel);
+            return { st, grades, att };
+        });
+        const subjects = [];
+        perStudent.forEach(p => p.grades.forEach(g => { if (g.hasScore && g.finalScore !== null && !subjects.includes(g.subject)) subjects.push(g.subject); }));
+        const rows = perStudent.map(p => {
+            const scores = {};
+            p.grades.forEach(g => { if (subjects.includes(g.subject)) scores[g.subject] = g.finalScore; });
+            const vals = subjects.map(s => scores[s]).filter(v => v !== null && v !== undefined);
+            const jumlah = vals.reduce((a, b) => a + b, 0);
+            const total = p.att.H + p.att.S + p.att.I + p.att.A;
+            return { st: p.st, scores, jumlah: vals.length ? Math.round(jumlah * 10) / 10 : null, rata: vals.length ? Math.round(jumlah / vals.length * 100) / 100 : null, att: p.att, persenHadir: total ? Math.round(p.att.H / total * 1000) / 10 : null };
+        });
+        const ranked = rows.filter(r => r.rata !== null).sort((a, b) => b.rata - a.rata);
+        ranked.forEach((r, i) => { r.rank = i > 0 && ranked[i - 1].rata === r.rata ? ranked[i - 1].rank : i + 1; });
+        const olahanSubjects = subjects.filter(s => findNilaiOlahan(cid, s, sem, tapel));
+        return { subjects, rows, olahanSubjects };
+    }
+
+    function renderRekapLaporan() {
+        const cid = document.getElementById('rekap-kelas')?.value, sem = document.getElementById('rekap-semester')?.value || 'ganjil', tapel = getActiveTapel();
+        const box = document.getElementById('rekap-preview'), info = document.getElementById('rekap-info');
+        if (!box) return;
+        if (!cid) { box.innerHTML = '<div class="text-center text-muted py-4">Pilih kelas terlebih dahulu.</div>'; if (info) info.textContent = ''; return; }
+        const { subjects, rows, olahanSubjects } = buildRekapData(cid, sem, tapel);
+        if (info) info.textContent = `${rows.length} siswa · ${subjects.length} mapel bernilai · ${olahanSubjects.length} mapel memakai nilai dari Pengolah Nilai` +
+            (subjects.length > olahanSubjects.length ? ' (mapel lain memakai rata-rata biasa)' : '');
+        if (rows.length === 0) { box.innerHTML = '<div class="text-center text-muted py-4">Belum ada siswa di kelas ini.</div>'; return; }
+        const head = `<tr class="text-center small"><th>No</th><th class="text-start">Nama Siswa</th>${subjects.map(s => `<th title="${escapeHtml(s)}">${escapeHtml(s.length > 14 ? s.slice(0, 13) + '…' : s)}${olahanSubjects.includes(s) ? ' <i class="bi bi-calculator text-primary" title="Dari Pengolah Nilai"></i>' : ''}</th>`).join('')}<th>Jumlah</th><th>Rata-rata</th><th>Rank</th><th>S</th><th>I</th><th>A</th></tr>`;
+        const body = rows.map((r, i) => `<tr class="text-center"><td>${i + 1}</td><td class="text-start text-nowrap fw-semibold">${escapeHtml(r.st.StudentName)}</td>${subjects.map(s => `<td>${pnFmt(r.scores[s] ?? null)}</td>`).join('')}<td>${pnFmt(r.jumlah)}</td><td class="fw-bold">${pnFmt(r.rata)}</td><td>${r.rank || '-'}</td><td>${r.att.S}</td><td>${r.att.I}</td><td>${r.att.A}</td></tr>`).join('');
+        box.innerHTML = `<table class="table table-bordered table-sm align-middle mb-0"><thead class="table-light">${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
+    async function downloadRekapExcel() {
+        const cid = document.getElementById('rekap-kelas')?.value, sem = document.getElementById('rekap-semester')?.value || 'ganjil', tapel = getActiveTapel();
+        if (!cid) return Swal.fire('Pilih Kelas', 'Pilih kelas yang akan direkap.', 'warning');
+        await ensureXLSX();
+        const { subjects, rows } = buildRekapData(cid, sem, tapel);
+        const kelas = pnKelasName(cid), semText = sem === 'ganjil' ? '1 (Ganjil)' : '2 (Genap)';
+        const header = title => [[title], ['Sekolah', db.config.userSchool || ''], ['Kelas', kelas], ['Semester', semText], ['Tahun Pelajaran', tapel], ['Wali Kelas', db.config.userName || ''], []];
+        const num = x => x === null || x === undefined ? '' : x;
+
+        const leger = header('LEGER NILAI AKHIR RAPOR');
+        leger.push(['No', 'NIS', 'NISN', 'Nama Siswa', ...subjects, 'Jumlah', 'Rata-rata', 'Peringkat']);
+        rows.forEach((r, i) => leger.push([i + 1, r.st.NIS || '', r.st.NISN || '', r.st.StudentName, ...subjects.map(s => num(r.scores[s])), num(r.jumlah), num(r.rata), r.rank || '']));
+        const wsLeger = XLSX.utils.aoa_to_sheet(leger);
+        wsLeger['!cols'] = [{ wch: 5 }, { wch: 12 }, { wch: 13 }, { wch: 30 }, ...subjects.map(() => ({ wch: 12 })), { wch: 9 }, { wch: 10 }, { wch: 10 }];
+
+        const hadir = header('REKAP KEHADIRAN SISWA');
+        hadir.push(['No', 'NIS', 'Nama Siswa', 'Hadir', 'Sakit', 'Izin', 'Alpa', '% Kehadiran']);
+        rows.forEach((r, i) => hadir.push([i + 1, r.st.NIS || '', r.st.StudentName, r.att.H, r.att.S, r.att.I, r.att.A, num(r.persenHadir)]));
+        const wsHadir = XLSX.utils.aoa_to_sheet(hadir);
+        wsHadir['!cols'] = [{ wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }];
+
+        const olah = header('DETAIL PENGOLAHAN NILAI');
+        olah.push(['Mata Pelajaran', 'No', 'Nama Siswa', 'Harian', 'PTS', 'PAS', 'Hadir (%)', 'Nilai Mentah', 'Nilai Akhir', 'Bobot (H/PTS/PAS/Hadir)', 'KKM', 'Penyesuaian']);
+        const recs = (db.nilaiAkhir || []).filter(r => String(r.ClassID) === String(cid) && String(r.Semester || '').toLowerCase() === sem && pnSameTapel(r.TahunPelajaran, tapel));
+        if (recs.length === 0) olah.push(['Belum ada mapel yang disimpan dari menu Pengolah Nilai. Nilai di leger memakai rata-rata biasa.']);
+        recs.forEach(rec => {
+            let s = PN_DEFAULT; try { s = Object.assign({}, PN_DEFAULT, JSON.parse(rec.Pengaturan || '{}')); } catch (e) { }
+            const data = parseNilaiData(rec);
+            rows.forEach((r, i) => {
+                const d = data[r.st.StudentID] || {};
+                olah.push([rec.Subject, i + 1, r.st.StudentName, num(pnNum(d.harian)), num(pnNum(d.pts)), num(pnNum(d.pas)), num(pnNum(d.hadir)), num(pnNum(d.mentah)), num(pnNum(d.akhir)),
+                    `${s.bobot.harian}/${s.bobot.pts}/${s.bobot.pas}/${s.bobot.hadir}`, s.kkm, pnMetodeText(s)]);
+            });
+        });
+        const wsOlah = XLSX.utils.aoa_to_sheet(olah);
+        wsOlah['!cols'] = [{ wch: 24 }, { wch: 5 }, { wch: 30 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 10 }, { wch: 13 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 34 }];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, wsLeger, 'Leger Nilai');
+        XLSX.utils.book_append_sheet(wb, wsHadir, 'Rekap Kehadiran');
+        XLSX.utils.book_append_sheet(wb, wsOlah, 'Pengolahan Nilai');
+        XLSX.writeFile(wb, `Rekap_${pnSafeName(kelas)}_Semester-${sem}_${pnSafeName(tapel)}.xlsx`);
     }

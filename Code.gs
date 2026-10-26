@@ -14,7 +14,8 @@
 const FRONTEND_URL = 'https://restinovika123-stack.github.io/agendaguru_/';
 // Naikkan angka ini jika fungsi API berubah, supaya frontend bisa memberi tahu guru
 // yang masih memakai Code.gs lama untuk memperbaruinya.
-const API_VERSION = 1;
+// v2: koleksi tambahan otomatis (sheet "X_..."), dipakai Pengolah Nilai.
+const API_VERSION = 2;
 
 /** Halaman pembuka: mengarahkan guru ke frontend GitHub sambil membawa alamat API ini. */
 function doGet() {
@@ -330,7 +331,7 @@ function readAllData_() {
 
   const subjectsData = cleanData('Subjects').map(row => row.SubjectName);
 
-  return {
+  const result = {
     config: configObj,
     classes: cleanData('Classes'),
     students: cleanData('Students'),
@@ -345,6 +346,45 @@ function readAllData_() {
     tpBank: cleanData('TPBank'),
     raporNotes: cleanData('RaporNotes')
   };
+  // Koleksi tambahan dari fitur baru (sheet berawalan "X_"), mis. X_nilaiAkhir -> result.nilaiAkhir
+  SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(sh => {
+    const name = sh.getName();
+    if (name.indexOf(EXTRA_PREFIX) === 0) result[name.slice(EXTRA_PREFIX.length)] = cleanData(name);
+  });
+  return result;
+}
+
+/* =====================================================================
+ * KOLEKSI TAMBAHAN (agar fitur baru di frontend tidak perlu update Code.gs lagi)
+ * Setiap array data di luar daftar inti disimpan otomatis ke sheet "X_<nama>".
+ * ===================================================================== */
+const EXTRA_PREFIX = 'X_';
+const CORE_COLLECTIONS = ['config', 'classes', 'students', 'attendance', 'grades', 'koku', 'ekskul',
+  'journal', 'schedule', 'subjects', 'poin', 'tpBank', 'raporNotes'];
+
+function writeExtraCollections_(ss, db) {
+  Object.keys(db).forEach(key => {
+    if (CORE_COLLECTIONS.indexOf(key) >= 0) return;
+    if (!/^[A-Za-z][A-Za-z0-9]{0,40}$/.test(key) || !Array.isArray(db[key])) return;
+    const rows = db[key].filter(r => r && typeof r === 'object' && !Array.isArray(r));
+    const headers = [];
+    rows.forEach(r => Object.keys(r).forEach(h => { if (headers.indexOf(h) < 0) headers.push(h); }));
+    const name = EXTRA_PREFIX + key;
+    let sheet = ss.getSheetByName(name);
+    if (!sheet) sheet = ss.insertSheet(name);
+    sheet.clear(); // kolom bisa berubah antar versi, jadi tulis ulang header + isi
+    if (headers.length === 0) return;
+    const values = [headers].concat(rows.map(r => headers.map(h => {
+      const v = r[h];
+      if (v === undefined || v === null) return '';
+      return typeof v === 'object' ? JSON.stringify(v) : String(v);
+    })));
+    const range = sheet.getRange(1, 1, values.length, headers.length);
+    range.setNumberFormat('@');
+    range.setValues(values);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f4f7f6');
+    sheet.setFrozenRows(1);
+  });
 }
 
 function writeSheet_(ss, sheetName, headers, dataArray) {
@@ -445,6 +485,7 @@ function saveAllData(dbString, token, baseRev, force) {
     const subjArr = (db.subjects || []).map(s => ({SubjectName: s}));
     writeSheet_(ss, 'Subjects', ['SubjectName'], subjArr);
     writeSheet_(ss, 'TPBank', ['TPID', 'Subject', 'GradeLevel', 'Code', 'Desc'], db.tpBank || []);
+    writeExtraCollections_(ss, db);
 
     return { ok: true, rev: newRev };
   } finally {

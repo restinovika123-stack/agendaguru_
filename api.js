@@ -11,7 +11,7 @@
 (function () {
     'use strict';
     var API_KEY = 'agendaGuru_apiUrl';
-    var MIN_API_VERSION = 1; // versi Code.gs minimum yang dibutuhkan frontend ini
+    var MIN_API_VERSION = 2; // versi Code.gs minimum yang dibutuhkan frontend ini (v2: Pengolah Nilai)
     // Data milik koneksi lama yang harus dibersihkan saat pindah ke Apps Script lain
     var PER_ACCOUNT_KEYS = ['agendaGuru_token', 'agendaGuru_unsynced', 'agendaGuru_isLogged', 'AGENDA_GURU_MASTER_DB'];
 
@@ -96,6 +96,7 @@
 
         // Cek versi Code.gs di latar belakang
         rawCall(apiUrl, 'getServerInfo', []).then(function (info) {
+            window.AGENDA_SERVER_INFO = info || null; // dipakai fitur yang butuh Code.gs versi tertentu
             if (info && Number(info.apiVersion || 0) < MIN_API_VERSION) {
                 showBanner('Code.gs di Spreadsheet Anda versi lama. Salin Code.gs terbaru ke Apps Script lalu buat deployment versi baru.');
             }
