@@ -586,7 +586,7 @@ window.AGENDA_GURU_LOADED = true;
             }
 
             serverRev = Number(db.config._rev) || 0;
-            const migrated = migrateTapelFields();
+            const migrated = migrateTapelFields() | bersihkanDataContohRapor();
 
             let isLogged = IS_GAS; // mode GAS: data hanya sampai ke sini jika token sesi valid
             if (!IS_GAS) { try { isLogged = localStorage.getItem('agendaGuru_isLogged') === 'true'; } catch (e) { } }
@@ -989,7 +989,10 @@ window.AGENDA_GURU_LOADED = true;
     function showAddClassModal() {
         Swal.fire({ title: 'Tambah Kelas Baru', input: 'text', inputPlaceholder: 'Nama Kelas (cth: Kelas 10-C)', showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Batal' }).then((result) => {
             if (result.isConfirmed && result.value) {
-                db.classes.push({ ClassID: "C" + (db.classes.length + 1), ClassName: result.value }); populateClassSelects(); syncDB();
+                // ID harus unik: setelah ada kelas yang dihapus, "C" + jumlah kelas bisa bentrok dengan ID yang masih dipakai
+                let n = db.classes.length + 1;
+                while (db.classes.some(c => String(c.ClassID) === 'C' + n)) n++;
+                db.classes.push({ ClassID: "C" + n, ClassName: result.value }); populateClassSelects(); syncDB();
                 Swal.fire('Tersimpan!', `Kelas ${result.value} berhasil ditambahkan.`, 'success');
             }
         });
@@ -2874,17 +2877,11 @@ window.AGENDA_GURU_LOADED = true;
         const elTapel = document.getElementById('rapor-tapel');
         if (elTapel && !elTapel.value) elTapel.value = getActiveTapel();
 
+        // HTML memberi nilai bawaan "genap", jadi pakai penanda pilihan guru (bukan cek nilai kosong)
         const elSem = document.getElementById('rapor-semester');
-        if (elSem && !elSem.value) elSem.value = defaultSem;
+        if (elSem && !elSem.dataset.userSet) elSem.value = defaultSem;
 
-        // Inisialisasi default pengaturan sekolah jika belum ada di config
-        if (!db.config.schoolCity) db.config.schoolCity = 'Bandung';
-        if (!db.config.userSchool) db.config.userSchool = 'SMPN 1 INDONESIA';
-        if (!db.config.schoolAddress) db.config.schoolAddress = 'Jl. Raya Indonesia, No. 17';
-        if (!db.config.userName) db.config.userName = 'Resti Novika, M.Pd.';
-        if (!db.config.userNIP) db.config.userNIP = '198501012010012001';
-        if (!db.config.headmasterName) db.config.headmasterName = 'Erik Santoso, S.Pd';
-        if (!db.config.headmasterNIP) db.config.headmasterNIP = '197005121995121001';
+        // Data sekolah/penandatangan TIDAK diisi otomatis: guru mengisinya sendiri di Pengaturan Sekolah.
         if (!db.config.raporFase) db.config.raporFase = 'D';
 
         onRaporKelasChange(targetStudentId);
@@ -2953,15 +2950,15 @@ window.AGENDA_GURU_LOADED = true;
 
     // Modal Pengaturan Sekolah & Titimangsa Rapor
     function openModalPengaturanRapor() {
-        document.getElementById('setting-rapor-sekolah').value = db.config.userSchool || 'SMPN 1 INDONESIA';
-        document.getElementById('setting-rapor-alamat').value = db.config.schoolAddress || 'Jl. Raya Indonesia, No. 17';
-        document.getElementById('setting-rapor-kota').value = db.config.schoolCity || 'Bandung';
+        document.getElementById('setting-rapor-sekolah').value = db.config.userSchool || '';
+        document.getElementById('setting-rapor-alamat').value = db.config.schoolAddress || '';
+        document.getElementById('setting-rapor-kota').value = db.config.schoolCity || '';
         document.getElementById('setting-rapor-fase').value = db.config.raporFase || 'D';
         document.getElementById('setting-rapor-tanggal').value = db.config.raporTanggal || new Date().toISOString().split('T')[0];
-        document.getElementById('setting-rapor-wali-nama').value = db.config.userName || 'Resti Novika, M.Pd.';
-        document.getElementById('setting-rapor-wali-nip').value = db.config.userNIP || '198501012010012001';
-        document.getElementById('setting-rapor-kepsek-nama').value = db.config.headmasterName || 'Erik Santoso, S.Pd';
-        document.getElementById('setting-rapor-kepsek-nip').value = db.config.headmasterNIP || '197005121995121001';
+        document.getElementById('setting-rapor-wali-nama').value = db.config.userName || '';
+        document.getElementById('setting-rapor-wali-nip').value = db.config.userNIP || '';
+        document.getElementById('setting-rapor-kepsek-nama').value = db.config.headmasterName || '';
+        document.getElementById('setting-rapor-kepsek-nip').value = db.config.headmasterNIP || '';
 
         const modalEl = document.getElementById('modalPengaturanRapor');
         let modalInstance = bootstrap.Modal.getInstance(modalEl);
@@ -3384,14 +3381,14 @@ window.AGENDA_GURU_LOADED = true;
         const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
 
         const fase = db.config.raporFase || 'D';
-        const kota = db.config.schoolCity || 'Bandung';
+        const kota = db.config.schoolCity || RAPOR_KOSONG;
         const tglStr = db.config.raporTanggal || new Date().toISOString().split('T')[0];
-        const sekolah = db.config.userSchool || 'SMPN 1 INDONESIA';
-        const alamat = db.config.schoolAddress || 'Jl. Raya Indonesia, No. 17';
-        const waliNama = db.config.userName || 'Resti Novika, M.Pd.';
-        const waliNip = db.config.userNIP || '198501012010012001';
-        const kepsekNama = db.config.headmasterName || 'Erik Santoso, S.Pd';
-        const kepsekNip = db.config.headmasterNIP || '197005121995121001';
+        const sekolah = db.config.userSchool || RAPOR_KOSONG;
+        const alamat = db.config.schoolAddress || RAPOR_KOSONG;
+        const waliNama = db.config.userName || RAPOR_KOSONG;
+        const waliNip = db.config.userNIP || '';
+        const kepsekNama = db.config.headmasterName || RAPOR_KOSONG;
+        const kepsekNip = db.config.headmasterNIP || '';
 
         const badge = document.getElementById('rapor-preview-target-badge');
         const container = document.getElementById('rapor-preview-container');
@@ -3695,9 +3692,10 @@ window.AGENDA_GURU_LOADED = true;
         </div>`;
     }
 
-    function cetakRaporBrowser() {
+    function cetakRaporBrowser(lewatiCekPengaturan) {
         const cid = document.getElementById('rapor-kelas')?.value;
         if (!cid) return Swal.fire('Peringatan', 'Silakan pilih kelas terlebih dahulu.', 'warning');
+        if (lewatiCekPengaturan !== true) return cekPengaturanRapor(() => cetakRaporBrowser(true));
 
         // Selalu buat ulang pratinjau agar yang dicetak adalah data terbaru
         // (termasuk nilai dari Pengolah Nilai).
@@ -3766,7 +3764,8 @@ window.AGENDA_GURU_LOADED = true;
         }, 300);
     }
 
-    async function prosesCetakRaporSiswaPDF() {
+    async function prosesCetakRaporSiswaPDF(lewatiCekPengaturan) {
+        if (lewatiCekPengaturan !== true) return cekPengaturanRapor(() => prosesCetakRaporSiswaPDF(true));
         ensureTPBank();
         const cid = document.getElementById('rapor-kelas')?.value;
         const studentId = document.getElementById('rapor-siswa')?.value;
@@ -3774,14 +3773,14 @@ window.AGENDA_GURU_LOADED = true;
         const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
 
         const fase = db.config.raporFase || 'D';
-        const kota = db.config.schoolCity || 'Bandung';
+        const kota = db.config.schoolCity || RAPOR_KOSONG;
         const tglStr = db.config.raporTanggal || new Date().toISOString().split('T')[0];
-        const sekolah = db.config.userSchool || 'SMPN 1 INDONESIA';
-        const alamat = db.config.schoolAddress || 'Jl. Raya Indonesia, No. 17';
-        const waliNama = db.config.userName || 'Resti Novika, M.Pd.';
-        const waliNip = db.config.userNIP || '198501012010012001';
-        const kepsekNama = db.config.headmasterName || 'Erik Santoso, S.Pd';
-        const kepsekNip = db.config.headmasterNIP || '197005121995121001';
+        const sekolah = db.config.userSchool || RAPOR_KOSONG;
+        const alamat = db.config.schoolAddress || RAPOR_KOSONG;
+        const waliNama = db.config.userName || RAPOR_KOSONG;
+        const waliNip = db.config.userNIP || '';
+        const kepsekNama = db.config.headmasterName || RAPOR_KOSONG;
+        const kepsekNip = db.config.headmasterNIP || '';
 
         const className = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid;
         const allStds = db.students.filter(s => String(s.ClassID) === String(cid));
@@ -4233,10 +4232,16 @@ window.AGENDA_GURU_LOADED = true;
         if (document.getElementById('ekskul-tapel') && !document.getElementById('ekskul-tapel').value) {
             document.getElementById('ekskul-tapel').value = getActiveTapel(); // ikut TP yang dipilih di atas
         }
-        if (document.getElementById('ekskul-semester') && !document.getElementById('ekskul-semester').value) {
-            document.getElementById('ekskul-semester').value = defaultSem;
+        const elEkskulSem = document.getElementById('ekskul-semester');
+        if (elEkskulSem && !elEkskulSem.dataset.userSet) {
+            elEkskulSem.value = defaultSem;
         }
     }
+
+    // Semester yang dipilih sendiri oleh guru tidak ditimpa lagi oleh nilai bawaan
+    document.addEventListener('change', e => {
+        if (e.target && (e.target.id === 'rapor-semester' || e.target.id === 'ekskul-semester')) e.target.dataset.userSet = '1';
+    });
 
     function onEkskulClassChange() {
         const cid = document.getElementById('ekskul-kelas')?.value;
@@ -4741,7 +4746,7 @@ window.AGENDA_GURU_LOADED = true;
 
             // 1. Kop Dokumen Resmi Sekolah
             const schoolName = (db.config.userSchool || 'SEKOLAH DASAR / MENENGAH').toUpperCase();
-            const teacherName = db.config.userName || 'Resti Novika, M.Pd.';
+            const teacherName = db.config.userName || RAPOR_KOSONG;
 
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(14);
@@ -5385,7 +5390,7 @@ window.AGENDA_GURU_LOADED = true;
 
             // 1. Kop Dokumen Resmi
             const schoolName = (db.config.userSchool || 'SEKOLAH DASAR / MENENGAH').toUpperCase();
-            const teacherName = db.config.userName || 'Resti Novika, M.Pd.';
+            const teacherName = db.config.userName || RAPOR_KOSONG;
 
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(14);
@@ -5588,9 +5593,9 @@ window.AGENDA_GURU_LOADED = true;
     // --- Profile ---
     let tempPhotoBase64 = "";
     function updateProfileUI() {
-        if (!db.config.userName) db.config.userName = "Resti Novika, M.Pd."; if (!db.config.userSchool) db.config.userSchool = "Guru Kelas";
-        document.getElementById('profile-name').innerText = db.config.userName; document.getElementById('profile-school').innerText = db.config.userSchool;
-        document.getElementById('profile-img').src = db.config.userPhoto || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(db.config.userName) + '&background=172B4D&color=fff');
+        const profName = db.config.userName || 'Guru', profSchool = db.config.userSchool || 'Guru Kelas';
+        document.getElementById('profile-name').innerText = profName; document.getElementById('profile-school').innerText = profSchool;
+        document.getElementById('profile-img').src = db.config.userPhoto || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(profName) + '&background=172B4D&color=fff');
     }
 
     function openProfileModal() {
@@ -6223,7 +6228,7 @@ window.AGENDA_GURU_LOADED = true;
 
         const className = cid === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid);
         const schoolName = (db.config.userSchool || 'SEKOLAH DASAR / MENENGAH').toUpperCase();
-        const teacherName = db.config.userName || 'Resti Novika, M.Pd.';
+        const teacherName = db.config.userName || RAPOR_KOSONG;
 
         const curDate = new Date();
         const curYear = curDate.getFullYear();
@@ -6514,7 +6519,7 @@ window.AGENDA_GURU_LOADED = true;
 
         const className = cid === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid);
         const schoolName = (db.config.userSchool || 'SEKOLAH DASAR / MENENGAH').toUpperCase();
-        const teacherName = db.config.userName || 'Resti Novika, M.Pd.';
+        const teacherName = db.config.userName || RAPOR_KOSONG;
 
         const curDate = new Date();
         const curYear = curDate.getFullYear();
@@ -7300,3 +7305,74 @@ window.AGENDA_GURU_LOADED = true;
         XLSX.utils.book_append_sheet(wb, wsOlah, 'Pengolahan Nilai');
         XLSX.writeFile(wb, `Rekap_${pnSafeName(kelas)}_Semester-${sem}_${pnSafeName(tapel)}.xlsx`);
     }
+
+    // =====================================================================
+    // DATA SEKOLAH & PENANDATANGAN RAPOR
+    // Tidak ada lagi data contoh (nama/NIP penulis, kepala sekolah contoh, dsb.).
+    // Isian yang belum diisi guru tampil sebagai titik-titik di rapor, dan guru
+    // diingatkan untuk melengkapinya sebelum mencetak.
+    // =====================================================================
+    const RAPOR_KOSONG = '..............................';
+
+    // Versi lama menyimpan data contoh ke Spreadsheet guru secara otomatis. Bersihkan
+    // hanya nilai yang persis sama dengan data contoh tersebut.
+    function bersihkanDataContohRapor() {
+        const c = db.config || {};
+        let changed = false;
+        const clear = (key, contoh) => { if (c[key] === contoh) { c[key] = ''; changed = true; } };
+        const dataContohOtomatis = c.userNIP === '198501012010012001' || c.headmasterNIP === '197005121995121001';
+        clear('userNIP', '198501012010012001');
+        clear('headmasterNIP', '197005121995121001');
+        clear('headmasterName', 'Erik Santoso, S.Pd');
+        clear('userSchool', 'SMPN 1 INDONESIA');
+        clear('schoolAddress', 'Jl. Raya Indonesia, No. 17');
+        if (dataContohOtomatis) { clear('userName', 'Resti Novika, M.Pd.'); clear('schoolCity', 'Bandung'); }
+        return changed;
+    }
+
+    function getPengaturanRaporKurang() {
+        const c = db.config || {}, kurang = [];
+        if (!c.userSchool || c.userSchool === 'Sekolah Saya') kurang.push('Nama sekolah');
+        if (!c.schoolAddress) kurang.push('Alamat sekolah');
+        if (!c.schoolCity) kurang.push('Kota (titimangsa)');
+        if (!c.userName) kurang.push('Nama wali kelas');
+        if (!c.headmasterName) kurang.push('Nama kepala sekolah');
+        return kurang;
+    }
+
+    // Sebelum mencetak/unduh PDF: ingatkan jika data sekolah belum lengkap
+    function cekPengaturanRapor(lanjut) {
+        const kurang = getPengaturanRaporKurang();
+        if (kurang.length === 0) return lanjut();
+        Swal.fire({
+            icon: 'info',
+            title: 'Lengkapi Data Sekolah',
+            html: `Data berikut belum diisi, sehingga di rapor tampil sebagai titik-titik:<br><b>${kurang.map(escapeHtml).join(', ')}</b>`,
+            showDenyButton: true, showCancelButton: true,
+            confirmButtonText: 'Isi Sekarang', denyButtonText: 'Tetap Lanjutkan', cancelButtonText: 'Batal'
+        }).then(r => {
+            if (r.isConfirmed) openModalPengaturanRapor();
+            else if (r.isDenied) lanjut();
+        });
+    }
+
+    // Pemberitahuan di atas pratinjau rapor (tidak ikut tercetak)
+    function tampilkanPeringatanPengaturanRapor() {
+        const box = document.getElementById('rapor-preview-container');
+        if (!box || !box.querySelector('.rapor-paper-sheet')) return;
+        const old = document.getElementById('rapor-setting-warning'); if (old) old.remove();
+        const kurang = getPengaturanRaporKurang();
+        if (kurang.length === 0) return;
+        const div = document.createElement('div');
+        div.id = 'rapor-setting-warning';
+        div.className = 'alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2 no-print';
+        div.innerHTML = `<div><i class="bi bi-exclamation-triangle me-1"></i> Data sekolah belum lengkap: <b>${kurang.map(escapeHtml).join(', ')}</b>. Bagian ini tampil sebagai titik-titik di rapor.</div>` +
+            '<button type="button" class="btn btn-sm btn-warning fw-semibold" onclick="openModalPengaturanRapor()"><i class="bi bi-gear me-1"></i> Isi Pengaturan Sekolah</button>';
+        box.prepend(div);
+    }
+    const _previewRaporSiswaAsli = previewRaporSiswa;
+    previewRaporSiswa = function () {
+        const hasil = _previewRaporSiswaAsli.apply(this, arguments);
+        tampilkanPeringatanPengaturanRapor();
+        return hasil;
+    };
