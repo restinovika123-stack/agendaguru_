@@ -377,6 +377,7 @@ window.AGENDA_GURU_LOADED = true;
             .withSuccessHandler(async res => {
                 if (res && res.authError) { Swal.close(); handleSessionExpired(); return; }
                 if (res && res.config) {
+                    delete res._license;
                     db = res;
                     setDirty(false); conflictPending = false;
                     await persistLocal();
@@ -419,6 +420,9 @@ window.AGENDA_GURU_LOADED = true;
     // - server sudah berubah            -> tampilkan pilihan (bentrok).
     async function applyServerData(res) {
         isOfflineMode = false;
+        const lic = res ? res._license : null;
+        if (res) delete res._license; // bukan bagian dari data guru
+        if (!(await licenseGate(lic, false))) return;
         const localDb = isDirty() ? await getLocalFallbackDb() : null;
         if (localDb && localDb.config) {
             processLoadedData(localDb);
@@ -441,6 +445,7 @@ window.AGENDA_GURU_LOADED = true;
         console.error("Gagal mengambil data dari server, memakai cache lokal:", err);
         const localDb = await getLocalFallbackDb();
         if (getToken() && localDb && localDb.config && localDb.config.registeredEmail) {
+            if (!(await licenseGate(null, true))) return;
             isOfflineMode = true;
             processLoadedData(localDb);
             updateSyncIndicator();
@@ -669,7 +674,10 @@ window.AGENDA_GURU_LOADED = true;
             const email = document.getElementById('regEmail').value.trim();
             const pass = document.getElementById('regPass').value;
             if (pass.length < 6) { setAuthBusy(false); return Swal.fire('Password Terlalu Pendek', 'Password minimal 6 karakter.', 'warning'); }
-            google.script.run.withSuccessHandler(onResult).withFailureHandler(onFail).registerAccount(name, email, pass);
+            const lisensiEl = document.getElementById('regLicense');
+            const licenseKey = normalizeLicenseKey(lisensiEl ? lisensiEl.value : '');
+            if (!LICENSE_KEY_RE.test(licenseKey)) { setAuthBusy(false); return Swal.fire('Kode Lisensi', 'Masukkan kode lisensi dari penjual (format AG-XXXX-XXXX-XXXX).', 'warning'); }
+            google.script.run.withSuccessHandler(onResult).withFailureHandler(onFail).registerAccount(name, email, pass, licenseKey);
         }
     }
 
@@ -731,6 +739,7 @@ window.AGENDA_GURU_LOADED = true;
             const clearAndReload = async () => {
                 try { localStorage.removeItem(MASTER_DB_ID); } catch (e) { }
                 try { if (typeof localforage !== 'undefined') await localforage.removeItem(MASTER_DB_ID); } catch (e) { }
+                try { localStorage.removeItem(LICENSE_CACHE_KEY); } catch (e) { }
                 location.reload();
             };
             google.script.run.withSuccessHandler(clearAndReload).withFailureHandler(clearAndReload).logoutAccount(t);
@@ -7383,3 +7392,130 @@ window.AGENDA_GURU_LOADED = true;
         tampilkanPeringatanPengaturanRapor();
         return hasil;
     };
+
+    // =====================================================================
+    // LISENSI
+    // Code.gs pembeli mengirim "izin" bertanda tangan digital dari server lisensi
+    // penjual. Tanda tangan diperiksa di sini dengan kunci publik: hanya server
+    // penjual (pemegang kunci privat) yang bisa membuat izin yang sah.
+    // Mode demo (tanpa server) tidak memerlukan lisensi.
+    // =====================================================================
+    const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAki4N+toJuvAs+v6EkBPs
+bP5gsJd1ZV4AJiYaflloWJiM+X2JsMfh873oJwHQRj8BiBU/XcKRqIHC4mBZL7Ao
+xPO+I2MQLSFyTevu8+N40G3jxIjfL1yIxepEyRIDoF4BUZLX+bMNN7rQ1FzgYHy7
+inDRAjXdnNWxunyFG/4X0xz4dQbbsy15UEJJHoGHmGM94uEqJhA4bOU6cFlThMmq
+l2BCG1tLkz7XfLKRdqq4Nqd0a3xBJ1yobc5abZO/6ulzxoZfQ9ZXKoCny//+27r/
+AEITYTlu03HJBSUGs7Xky3o9tMexOx6eNZHN2VGLtazX6FPyqoAr+qT88HOgTlM2
+gQIDAQAB
+-----END PUBLIC KEY-----`;
+    const LICENSE_CACHE_KEY = 'agendaGuru_license';
+    const LICENSE_SUPPORT_WA = '6285788408882';
+    const LICENSE_KEY_RE = /^AG-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+
+    function normalizeLicenseKey(v) {
+        let s = String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (s.startsWith('AG')) s = s.slice(2);
+        return s.length === 12 ? `AG-${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}` : String(v || '').trim().toUpperCase();
+    }
+
+    async function verifySignedLicense(lic) {
+        if (!lic || !lic.payload || !lic.sig || !window.crypto || !crypto.subtle) return null;
+        try {
+            const der = Uint8Array.from(atob(LICENSE_PUBLIC_KEY.replace(/-----[^-]+-----|\s/g, '')), c => c.charCodeAt(0));
+            const key = await crypto.subtle.importKey('spki', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+            const sig = Uint8Array.from(atob(lic.sig), c => c.charCodeAt(0));
+            const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig, new TextEncoder().encode(lic.payload));
+            if (!ok) return null;
+            const p = JSON.parse(lic.payload);
+            if (p.app !== 'AgendaGuru') return null;
+            if (lic.scriptId && p.sid !== lic.scriptId) return null;
+            return p;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // true = boleh lanjut membuka aplikasi. false = layar aktivasi lisensi ditampilkan.
+    async function licenseGate(lic, offline) {
+        if (!IS_GAS) return true;
+        if (offline) { try { lic = JSON.parse(localStorage.getItem(LICENSE_CACHE_KEY) || 'null'); } catch (e) { lic = null; } }
+        if (!lic) { showLicenseScreen(offline ? 'offline' : 'upgrade'); return false; }
+        const p = await verifySignedLicense(lic);
+        if (p && p.exp > Date.now()) {
+            if (!offline) { try { localStorage.setItem(LICENSE_CACHE_KEY, JSON.stringify({ payload: lic.payload, sig: lic.sig, scriptId: lic.scriptId })); } catch (e) { } }
+            window.AGENDA_LICENSE = p;
+            return true;
+        }
+        const reason = lic.reason || (p ? (lic.hasKey === false ? 'missing' : 'renew') : (lic.payload ? 'invalid' : (lic.hasKey ? 'renew' : 'missing')));
+        showLicenseScreen(reason, lic.message);
+        return false;
+    }
+
+    function showLicenseScreen(reason, serverMessage) {
+        const ov = document.getElementById('loading-overlay'); if (ov) ov.style.display = 'none';
+        ['app-view', 'login-view'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+        const texts = {
+            missing: 'Akun ini belum memiliki lisensi. Masukkan kode lisensi yang Anda terima dari penjual.',
+            revoked: 'Lisensi untuk aplikasi ini sudah dinonaktifkan. Hubungi penjual, atau masukkan kode lisensi lain.',
+            expired: 'Masa berlaku lisensi sudah habis. Hubungi penjual untuk memperpanjang.',
+            limit: 'Kode lisensi ini sudah dipakai di Spreadsheet lain.',
+            invalid: 'Data lisensi tidak valid. Masukkan ulang kode lisensi Anda.',
+            renew: 'Izin lisensi perlu diperbarui, tetapi server lisensi belum dapat dihubungi. Coba lagi beberapa saat, atau masukkan ulang kode lisensi.',
+            offline: 'Perangkat sedang offline dan izin lisensi di perangkat ini belum ada atau sudah habis. Sambungkan internet lalu muat ulang.',
+            upgrade: 'Code.gs di Spreadsheet Anda masih versi lama dan belum mendukung lisensi. Salin Code.gs terbaru ke Apps Script, lalu buat versi deployment baru.'
+        };
+        const canActivate = reason !== 'upgrade' && reason !== 'offline';
+        const old = document.getElementById('ag-license'); if (old) old.remove();
+        const wrap = document.createElement('div');
+        wrap.id = 'ag-license';
+        wrap.style.cssText = 'position:fixed;inset:0;z-index:4500;background:#172B4D;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto';
+        wrap.innerHTML = `
+            <div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:28px;font-family:var(--font-family, system-ui, sans-serif);color:#172B4D">
+                <div style="font-size:2rem;line-height:1">🔑</div>
+                <h4 style="font-weight:800;margin:10px 0 6px">Aktivasi Lisensi AgendaGuru</h4>
+                <p style="color:#5E6C84;font-size:14px;margin:0 0 4px">${escapeHtml(texts[reason] || texts.invalid)}</p>
+                ${serverMessage && reason === 'limit' ? `<p style="color:#5E6C84;font-size:13px;margin:0 0 4px">${escapeHtml(serverMessage)}</p>` : ''}
+                ${canActivate ? `
+                <label for="ag-license-input" style="font-weight:700;font-size:13px;margin-top:12px;display:block">Kode Lisensi</label>
+                <input id="ag-license-input" class="form-control form-control-lg text-uppercase" placeholder="AG-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" style="margin:6px 0">
+                <div id="ag-license-msg" role="status" aria-live="polite" style="font-size:13px;min-height:20px;color:#C44747"></div>
+                <button id="ag-license-btn" type="button" class="btn btn-primary w-100 fw-bold">Aktifkan</button>` :
+                (reason === 'upgrade' ? `<a href="panduan.html" target="_blank" rel="noopener" class="btn btn-primary w-100 fw-bold mt-3">Buka Panduan Pembaruan</a>` :
+                    `<button type="button" class="btn btn-primary w-100 fw-bold mt-3" onclick="location.reload()">Muat Ulang</button>`)}
+                <a href="https://wa.me/${LICENSE_SUPPORT_WA}?text=${encodeURIComponent('Halo, saya butuh bantuan lisensi AgendaGuru')}" target="_blank" rel="noopener" class="btn btn-outline-success w-100 mt-2">💬 Hubungi Penjual (WhatsApp)</a>
+                <button id="ag-license-logout" type="button" class="btn btn-link w-100 text-secondary mt-1">Keluar Akun</button>
+                <p style="color:#5E6C84;font-size:12px;margin:10px 0 0">Data Anda tetap aman di Google Spreadsheet milik Anda.</p>
+            </div>`;
+        document.body.appendChild(wrap);
+        document.getElementById('ag-license-logout').onclick = () => {
+            setToken('');
+            try { localStorage.removeItem(LICENSE_CACHE_KEY); } catch (e) { }
+            location.reload();
+        };
+        if (!canActivate) return;
+        const input = document.getElementById('ag-license-input'), msg = document.getElementById('ag-license-msg'), btn = document.getElementById('ag-license-btn');
+        const go = () => {
+            const key = normalizeLicenseKey(input.value);
+            input.value = key;
+            if (!LICENSE_KEY_RE.test(key)) { msg.textContent = 'Format kode: AG-XXXX-XXXX-XXXX'; return; }
+            btn.disabled = true; msg.style.color = '#5E6C84'; msg.textContent = 'Memeriksa kode lisensi...';
+            google.script.run
+                .withSuccessHandler(async res => {
+                    if (res && res.authError) { setToken(''); location.reload(); return; }
+                    if (res && res.ok && await verifySignedLicense(res.license)) {
+                        try { localStorage.setItem(LICENSE_CACHE_KEY, JSON.stringify(res.license)); } catch (e) { }
+                        msg.style.color = '#21865B'; msg.textContent = 'Lisensi aktif! Memuat aplikasi...';
+                        setTimeout(() => location.reload(), 600);
+                        return;
+                    }
+                    btn.disabled = false; msg.style.color = '#C44747';
+                    msg.textContent = (res && res.message) || 'Kode lisensi tidak valid.';
+                })
+                .withFailureHandler(err => { btn.disabled = false; msg.style.color = '#C44747'; msg.textContent = 'Tidak dapat terhubung: ' + ((err && err.message) || err); })
+                .activateLicense(getToken(), key);
+        };
+        btn.onclick = go;
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+        input.focus();
+    }

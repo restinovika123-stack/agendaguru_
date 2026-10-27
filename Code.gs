@@ -15,7 +15,10 @@ const FRONTEND_URL = 'https://restinovika123-stack.github.io/agendaguru_/';
 // Naikkan angka ini jika fungsi API berubah, supaya frontend bisa memberi tahu guru
 // yang masih memakai Code.gs lama untuk memperbaruinya.
 // v2: koleksi tambahan otomatis (sheet "X_..."), dipakai Pengolah Nilai.
-const API_VERSION = 2;
+// v3: lisensi (kode lisensi diverifikasi ke server lisensi penjual).
+const API_VERSION = 3;
+// Alamat Aplikasi Web server lisensi milik penjual (berakhiran /exec).
+const LICENSE_SERVER_URL = 'https://script.google.com/macros/s/AKfycbzyQBF32jM2Gwr5ShNV1Ga2O3X3XqFed9OdPt8jgtparnbIMVozwZW2PJ2RiAJcS-7uTg/exec';
 
 /** Halaman pembuka: mengarahkan guru ke frontend GitHub sambil membawa alamat API ini. */
 function doGet() {
@@ -55,7 +58,8 @@ function doPost(e) {
     getAllData: getAllData,
     saveAllData: saveAllData,
     uploadFileToDrive: uploadFileToDrive,
-    syncToCalendar: syncToCalendar
+    syncToCalendar: syncToCalendar,
+    activateLicense: activateLicense
   };
   let out;
   try {
@@ -71,7 +75,71 @@ function doPost(e) {
 }
 
 function getServerInfo() {
-  return { app: 'AgendaGuru', apiVersion: API_VERSION, registered: isRegistered_() };
+  return { app: 'AgendaGuru', apiVersion: API_VERSION, registered: isRegistered_(), scriptId: ScriptApp.getScriptId() };
+}
+
+/* =====================================================================
+ * LISENSI
+ * Kode lisensi diverifikasi ke server lisensi penjual. Server membalas "izin"
+ * bertanda tangan digital (berlaku 14 hari) yang diperiksa oleh aplikasi.
+ * Izin diperbarui otomatis sebelum habis selama kodenya masih aktif.
+ * ===================================================================== */
+const LICENSE_RENEW_BEFORE_MS = 7 * 24 * 3600 * 1000; // perbarui jika sisa < 7 hari
+
+function verifyLicenseRemote_(key, email) {
+  if (!LICENSE_SERVER_URL) return { ok: false, network: true, message: 'Server lisensi belum diatur oleh penjual.' };
+  try {
+    const res = UrlFetchApp.fetch(LICENSE_SERVER_URL, {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true, followRedirects: true,
+      payload: JSON.stringify({
+        action: 'verify', key: String(key || '').trim().toUpperCase(), scriptId: ScriptApp.getScriptId(),
+        email: email || props_().getProperty('AUTH_EMAIL') || '', app: 'AgendaGuru', version: API_VERSION
+      })
+    });
+    const out = JSON.parse(res.getContentText());
+    return out && out.ok ? out : { ok: false, network: true, message: 'Server lisensi tidak merespons dengan benar.' };
+  } catch (e) {
+    return { ok: false, network: true, message: 'Tidak dapat menghubungi server lisensi: ' + e.message };
+  }
+}
+
+function storeLicense_(key, license) {
+  props_().setProperties({ LICENSE_KEY: String(key).trim().toUpperCase(), LICENSE_PAYLOAD: license.payload, LICENSE_SIG: license.sig });
+}
+
+function clearLicense_() {
+  ['LICENSE_PAYLOAD', 'LICENSE_SIG'].forEach(k => props_().deleteProperty(k));
+}
+
+/** Izin lisensi saat ini, diperbarui otomatis bila hampir habis. */
+function currentLicense_() {
+  const p = props_();
+  const key = p.getProperty('LICENSE_KEY');
+  let payload = p.getProperty('LICENSE_PAYLOAD'), sig = p.getProperty('LICENSE_SIG');
+  let exp = 0;
+  try { exp = Number(JSON.parse(payload || '{}').exp) || 0; } catch (e) { }
+  if (key && (!payload || exp - Date.now() < LICENSE_RENEW_BEFORE_MS)) {
+    const r = verifyLicenseRemote_(key);
+    if (r.ok && r.valid) { storeLicense_(key, r.license); payload = r.license.payload; sig = r.license.sig; }
+    else if (r.ok && !r.valid) { clearLicense_(); payload = null; sig = null; return { payload: null, sig: null, scriptId: ScriptApp.getScriptId(), reason: r.reason, message: r.message }; }
+    // gangguan jaringan: tetap pakai izin lama sampai masa berlakunya habis
+  }
+  return { payload: payload || null, sig: sig || null, scriptId: ScriptApp.getScriptId(), hasKey: !!key };
+}
+
+function withLicense_(data) {
+  data._license = currentLicense_();
+  return data;
+}
+
+/** Mengaktifkan kode lisensi untuk akun yang sudah login (mis. instalasi lama). */
+function activateLicense(token, key) {
+  if (!isValidToken_(token)) return { ok: false, authError: true };
+  const r = verifyLicenseRemote_(key);
+  if (!r.ok) return { ok: false, message: r.message || 'Tidak dapat menghubungi server lisensi.' };
+  if (!r.valid) return { ok: false, reason: r.reason, message: r.message || 'Kode lisensi tidak valid.' };
+  storeLicense_(key, r.license);
+  return { ok: true, license: currentLicense_() };
 }
 
 /** Buat sheet otomatis saat pertama dipakai, jadi guru tidak perlu menjalankan setupDatabase. */
@@ -159,7 +227,7 @@ function getAuthStatus() {
   return { registered: isRegistered_() };
 }
 
-function registerAccount(name, email, password) {
+function registerAccount(name, email, password, licenseKey) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -168,6 +236,12 @@ function registerAccount(name, email, password) {
     name = String(name || '').trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, message: 'Format email tidak valid.' };
     if (String(password || '').length < 6) return { ok: false, message: 'Password minimal 6 karakter.' };
+    // Kode lisensi wajib dan dicek ke server lisensi sebelum akun dibuat
+    if (!String(licenseKey || '').trim()) return { ok: false, message: 'Kode lisensi wajib diisi.' };
+    const lic = verifyLicenseRemote_(licenseKey, email);
+    if (!lic.ok) return { ok: false, message: lic.message || 'Tidak dapat menghubungi server lisensi. Coba lagi.' };
+    if (!lic.valid) return { ok: false, message: lic.message || 'Kode lisensi tidak valid.' };
+    storeLicense_(licenseKey, lic.license);
     setPassword_(email, String(password));
 
     const config = {};
@@ -181,7 +255,7 @@ function registerAccount(name, email, password) {
   } finally {
     lock.releaseLock();
   }
-  return { ok: true, token: createSession_(), data: readAllData_() };
+  return { ok: true, token: createSession_(), data: withLicense_(readAllData_()) };
 }
 
 function loginAccount(email, password) {
@@ -200,7 +274,7 @@ function loginAccount(email, password) {
     return { ok: false, message: 'Email atau password salah.' };
   }
   cache.remove('LOGIN_FAILS');
-  return { ok: true, token: createSession_(), data: readAllData_() };
+  return { ok: true, token: createSession_(), data: withLicense_(readAllData_()) };
 }
 
 function logoutAccount(token) {
@@ -318,7 +392,7 @@ function cleanData(sheetName) {
  */
 function getAllData(token) {
   if (!isValidToken_(token)) return { authError: true, registered: isRegistered_() };
-  return readAllData_();
+  return withLicense_(readAllData_());
 }
 
 function readAllData_() {

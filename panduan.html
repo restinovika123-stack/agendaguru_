@@ -100,14 +100,14 @@
                 <li>Klik <b>Izinkan akses</b>, lalu pilih akun Google Anda.</li>
                 <li>Jika muncul <i>"Google belum memverifikasi aplikasi ini"</i>, klik <b>Lanjutan</b> → <b>Buka (nama proyek) (tidak aman)</b> → <b>Izinkan</b>.</li>
             </ol>
-            <div class="note">Peringatan ini wajar karena kodenya berjalan di akun Anda sendiri. Aplikasi hanya mengakses Spreadsheet ini, folder bukti foto di Drive, dan kalender Anda (jika fitur sinkron dipakai).</div>
+            <div class="note">Peringatan ini wajar karena kodenya berjalan di akun Anda sendiri. Aplikasi hanya mengakses Spreadsheet ini, folder bukti foto di Drive, kalender Anda (jika fitur sinkron dipakai), serta menghubungi server lisensi untuk memeriksa kode lisensi.</div>
         </section>
 
         <section class="step" aria-labelledby="s6">
             <h2 id="s6"><span class="num">6</span> Buka aplikasi &amp; daftar akun</h2>
             <ol>
                 <li>Salin <b>URL Aplikasi web</b> yang muncul (berakhiran <code>/exec</code>) dan buka di browser.</li>
-                <li>Klik <b>Buka AgendaGuru</b>, lalu isi formulir <b>Daftar</b>.</li>
+                <li>Klik <b>Buka AgendaGuru</b>, lalu isi formulir <b>Daftar</b> beserta <b>Kode Lisensi</b> yang Anda terima dari penjual (format <code>AG-XXXX-XXXX-XXXX</code>).</li>
                 <li>Simpan (bookmark) alamat aplikasi. Di perangkat lain, buka alamat yang sama dan tempel URL <code>/exec</code> saat diminta.</li>
                 <li>Isi <b>Cetak Rapor Siswa → Pengaturan Sekolah &amp; Titimangsa</b> agar rapor memuat data sekolah Anda.</li>
             </ol>
@@ -126,6 +126,14 @@
         <details>
             <summary>Muncul tulisan "Code.gs di Spreadsheet Anda versi lama"</summary>
             <p>Salin Code.gs terbaru (langkah 2), tempel ulang di Apps Script, lalu <b>Terapkan → Kelola deployment → ✏️ Edit → Versi: Versi baru → Terapkan</b>. Alamat aplikasi tidak berubah.</p>
+        </details>
+        <details>
+            <summary>Kode lisensi ditolak</summary>
+            <ul>
+                <li><b>Tidak ditemukan:</b> periksa kembali penulisan kode (huruf O dan angka 0 tidak dipakai dalam kode).</li>
+                <li><b>Sudah dipakai di Spreadsheet lain:</b> satu kode berlaku untuk satu Spreadsheet. Hubungi penjual jika ingin pindah Spreadsheet.</li>
+                <li><b>Dinonaktifkan / habis masa berlaku:</b> hubungi penjual.</li>
+            </ul>
         </details>
         <details>
             <summary>Lupa password</summary>

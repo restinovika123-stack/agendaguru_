@@ -11,7 +11,7 @@
 (function () {
     'use strict';
     var API_KEY = 'agendaGuru_apiUrl';
-    var MIN_API_VERSION = 2; // versi Code.gs minimum yang dibutuhkan frontend ini (v2: Pengolah Nilai)
+    var MIN_API_VERSION = 3; // versi Code.gs minimum (v2: Pengolah Nilai, v3: lisensi)
     // Data milik koneksi lama yang harus dibersihkan saat pindah ke Apps Script lain
     var PER_ACCOUNT_KEYS = ['agendaGuru_token', 'agendaGuru_unsynced', 'agendaGuru_isLogged', 'AGENDA_GURU_MASTER_DB'];
 
