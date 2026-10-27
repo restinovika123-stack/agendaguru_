@@ -7481,7 +7481,7 @@ gQIDAQAB
                 <input id="ag-license-input" class="form-control form-control-lg text-uppercase" placeholder="AG-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" style="margin:6px 0">
                 <div id="ag-license-msg" role="status" aria-live="polite" style="font-size:13px;min-height:20px;color:#C44747"></div>
                 <button id="ag-license-btn" type="button" class="btn btn-primary w-100 fw-bold">Aktifkan</button>` :
-                (reason === 'upgrade' ? `<a href="panduan.html" target="_blank" rel="noopener" class="btn btn-primary w-100 fw-bold mt-3">Buka Panduan Pembaruan</a>` :
+                (reason === 'upgrade' ? `<a href="https://agendaguru-id.vercel.app/#kendala" target="_blank" rel="noopener" class="btn btn-primary w-100 fw-bold mt-3">Buka Panduan Pembaruan</a>` :
                     `<button type="button" class="btn btn-primary w-100 fw-bold mt-3" onclick="location.reload()">Muat Ulang</button>`)}
                 <a href="https://wa.me/${LICENSE_SUPPORT_WA}?text=${encodeURIComponent('Halo, saya butuh bantuan lisensi AgendaGuru')}" target="_blank" rel="noopener" class="btn btn-outline-success w-100 mt-2">💬 Hubungi Penjual (WhatsApp)</a>
                 <button id="ag-license-logout" type="button" class="btn btn-link w-100 text-secondary mt-1">Keluar Akun</button>

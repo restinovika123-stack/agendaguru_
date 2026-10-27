@@ -136,7 +136,7 @@
                 '<button id="ag-api-btn" class="btn btn-primary w-100" style="margin-top:6px">Hubungkan</button>' +
                 (opts.allowDemo !== false ? '<button id="ag-demo-btn" class="btn btn-link w-100" style="margin-top:4px">Coba mode demo (data contoh, tidak tersimpan)</button>' : '') +
                 (opts.allowClose ? '<button id="ag-close-btn" class="btn btn-link w-100 text-secondary">Batal</button>' : '') +
-                '<p style="color:#6b778c;font-size:13px;margin:12px 0 0">Belum punya alamat Aplikasi Web? <a href="panduan.html" target="_blank" rel="noopener" style="color:#159A9C;font-weight:700">Lihat Panduan Pemasangan (5–10 menit)</a></p>' +
+                '<p style="color:#6b778c;font-size:13px;margin:12px 0 0">Belum punya alamat Aplikasi Web? <a href="https://agendaguru-id.vercel.app" target="_blank" rel="noopener" style="color:#159A9C;font-weight:700">Lihat Panduan Pemasangan (5–10 menit)</a></p>' +
                 '</div>';
             document.body.appendChild(wrap);
             var input = document.getElementById('ag-api-input');

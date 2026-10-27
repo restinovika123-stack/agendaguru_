@@ -43,11 +43,11 @@ Pembeli cukup membuat salinan template. Kode aplikasi (Code.gs) ikut tersalin, j
 5. Klik **Bagikan** → *Akses umum*: **Siapa saja yang memiliki link** → **Pelihat**.
 6. Salin link template, lalu ganti bagian akhir `/edit...` menjadi `/copy`. Contoh:
    `https://docs.google.com/spreadsheets/d/ID_TEMPLATE/copy`
-   Link ini dipasang di tombol **Buat Salinan Template** pada panduan.html.
+   Link ini dipasang di tombol **Buat Salinan Template** pada landing page panduan (`landing/index.html`, https://agendaguru-id.vercel.app).
 
 Setiap kali Code.gs diperbarui, ulangi langkah 2–3 di template agar pembeli baru langsung mendapat versi terbaru.
 
-### Yang dilakukan pembeli (lihat panduan.html)
+### Yang dilakukan pembeli (lihat https://agendaguru-id.vercel.app)
 1. Klik **Buat Salinan Template** → **Buat salinan**.
 2. Di salinan: **Ekstensi → Apps Script → Terapkan → Deployment baru → Aplikasi web**
    (Jalankan sebagai **Saya**, akses **Siapa saja**), lalu izinkan akses.
@@ -89,3 +89,11 @@ Pembaruan berikutnya: `node build_frontend.js`, lalu di folder `frontend-github`
 - **Foto bukti lama masih publik:** jalankan fungsi `jadikanFolderBuktiPrivat` sekali.
 - **"Tidak dapat terhubung ke server":** pastikan deployment aksesnya *Siapa saja* dan URL
   berakhiran `/exec`.
+
+## F. Landing page panduan (Vercel)
+
+- Alamat: **https://agendaguru-id.vercel.app** (panduan) dan **/privasi** (kebijakan privasi).
+- Sumber halaman ada di folder `landing/` (`index.html`, `privasi.html`, `vercel.json`).
+- Tombol "Salin Code.gs" di landing page mengambil Code.gs terbaru dari GitHub, jadi tidak perlu
+  diperbarui setiap kali Code.gs berubah.
+- Alamat lama `…github.io/agendaguru_/panduan.html` otomatis dialihkan ke Vercel.

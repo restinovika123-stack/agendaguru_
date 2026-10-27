@@ -12,6 +12,8 @@
 
 // ---- PENGATURAN PEMILIK APLIKASI (isi sekali sebelum file ini dibagikan) ----
 const FRONTEND_URL = 'https://restinovika123-stack.github.io/agendaguru_/';
+// Halaman panduan pemasangan untuk pembeli (landing page di Vercel)
+const GUIDE_URL = 'https://agendaguru-id.vercel.app';
 // Naikkan angka ini jika fungsi API berubah, supaya frontend bisa memberi tahu guru
 // yang masih memakai Code.gs lama untuk memperbaruinya.
 // v2: koleksi tambahan otomatis (sheet "X_..."), dipakai Pengolah Nilai.
@@ -73,7 +75,7 @@ function menuCaraAktifkan() {
     '<li>Jalankan sebagai: <b>Saya</b>. Yang memiliki akses: <b>Siapa saja</b>. Klik <b>Terapkan</b>.</li>' +
     '<li>Izinkan akses (jika muncul peringatan: <b>Lanjutan → Buka (tidak aman) → Izinkan</b>).</li>' +
     '<li>Kembali ke Spreadsheet ini, klik <b>AgendaGuru → Buka Aplikasi</b>.</li></ol>' +
-    '<p style="font-size:12px;color:#5E6C84">Panduan lengkap: <a href="' + FRONTEND_URL + 'panduan.html" target="_blank">' + FRONTEND_URL + 'panduan.html</a></p></div>'
+    '<p style="font-size:12px;color:#5E6C84">Panduan lengkap: <a href="' + GUIDE_URL + '" target="_blank">' + GUIDE_URL + '</a></p></div>'
   ).setWidth(480).setHeight(380);
   SpreadsheetApp.getUi().showModalDialog(html, 'Cara Mengaktifkan AgendaGuru');
 }
