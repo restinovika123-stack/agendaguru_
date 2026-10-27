@@ -1,0 +1,18 @@
+{
+  "id": "./",
+  "name": "AgendaGuru - Manajemen Kelas Digital",
+  "short_name": "AgendaGuru",
+  "description": "Absensi, nilai, jurnal, pengolah nilai, dan rapor Kurikulum Merdeka.",
+  "lang": "id",
+  "start_url": "./?sumber=aplikasi",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F7F6",
+  "theme_color": "#172B4D",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

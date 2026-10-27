@@ -718,24 +718,26 @@ window.AGENDA_GURU_LOADED = true;
         populateMapelSelects();
         updateProfileUI();
         switchView('beranda');
-        setTimeout(() => tawarkanInstalAplikasi(false), 1500);
+        setTimeout(() => tawarkanInstalAplikasi(MINTA_INSTAL), MINTA_INSTAL ? 800 : 1500);
     }
 
-    // --- Ajakan memasang aplikasi (HP, tablet, laptop) ---
+    // --- Pasang aplikasi (PWA) di HP, tablet, laptop ---
+    // Aplikasi yang bisa dipasang ada di alamat frontend (GitHub Pages). Dari link /exec (di dalam
+    // bingkai Google) tombol Instal browser tidak tersedia, jadi pengguna diarahkan ke halaman pemasangan
+    // yang otomatis terhubung ke Apps Script miliknya.
     const INSTALL_KEY = 'agendaGuru_install';
     let installPromptEvent = null;
     window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPromptEvent = e; });
-    window.addEventListener('appinstalled', () => setInstallState('terpasang'));
+    window.addEventListener('appinstalled', () => { setInstallState('terpasang'); installPromptEvent = null; });
 
     function getInstallState() { try { return JSON.parse(localStorage.getItem(INSTALL_KEY) || '{}'); } catch (e) { return {}; } }
     function setInstallState(status) { try { localStorage.setItem(INSTALL_KEY, JSON.stringify({ status, at: Date.now() })); } catch (e) { } }
 
-    function aplikasiSudahTerpasang() {
+    function dibukaSebagaiAplikasi() {
         try {
             if (['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'].some(m => window.matchMedia('(display-mode: ' + m + ')').matches)) return true;
         } catch (e) { }
-        if (window.navigator.standalone === true) return true;
-        return getInstallState().status === 'terpasang';
+        return window.navigator.standalone === true;
     }
 
     function jenisPerangkat() {
@@ -745,55 +747,103 @@ window.AGENDA_GURU_LOADED = true;
         return /Edg\//.test(ua) ? 'edge' : 'desktop';
     }
 
-    function langkahInstal(jenis) {
-        const chip = t => `<span style="display:inline-block;background:#EEF1F5;border:1px solid #DFE3EA;border-radius:6px;padding:0 7px;font-weight:700">${t}</span>`;
-        if (jenis === 'ios') return { judul: 'iPhone / iPad', langkah: [`Buka alamat aplikasi ini di <b>Safari</b>.`, `Ketuk tombol Bagikan ${chip('<i class="bi bi-box-arrow-up"></i>')} di bawah/atas layar.`, `Pilih ${chip('Tambahkan ke Layar Utama')}, lalu ketuk ${chip('Tambah')}.`] };
-        if (jenis === 'android') return { judul: 'HP / Tablet Android', langkah: [`Buka alamat aplikasi ini di <b>Google Chrome</b>.`, `Ketuk menu ${chip('⋮')} di kanan atas.`, `Pilih ${chip('Tambahkan ke layar utama')}, lalu ketuk ${chip('Tambahkan')} / ${chip('Instal')}.`] };
-        if (jenis === 'edge') return { judul: 'Laptop / Komputer (Microsoft Edge)', langkah: [`Klik menu ${chip('⋯')} di kanan atas.`, `Pilih ${chip('Aplikasi')} → ${chip('Instal situs ini sebagai aplikasi')}.`, `Klik ${chip('Instal')}.`] };
-        return { judul: 'Laptop / Komputer (Google Chrome)', langkah: [`Klik menu ${chip('⋮')} di kanan atas.`, `Pilih ${chip('Transmisikan, simpan, dan bagikan')} → ${chip('Instal halaman sebagai aplikasi')}.`, `Klik ${chip('Instal')}. Ikon AgendaGuru akan muncul di desktop.`] };
+    function alamatPemasangan() {
+        let base;
+        try { base = new URL('./', document.baseURI).href; } catch (e) { base = './'; }
+        const exec = (window.AGENDA_SERVER_INFO && window.AGENDA_SERVER_INFO.url) || '';
+        const p = new URLSearchParams();
+        if (/\/exec$/.test(exec)) p.set('api', exec);
+        p.set('instal', '1');
+        return base + '?' + p.toString();
     }
 
-    // paksa=true: dibuka dari menu (selalu tampil). paksa=false: otomatis setelah masuk aplikasi.
+    function langkahInstal(jenis) {
+        const chip = t => `<span style="display:inline-block;background:#EEF1F5;border:1px solid #DFE3EA;border-radius:6px;padding:0 7px;font-weight:700">${t}</span>`;
+        if (jenis === 'ios') return { judul: 'iPhone / iPad (Safari)', langkah: [`Ketuk tombol Bagikan ${chip('<i class="bi bi-box-arrow-up"></i>')}.`, `Pilih ${chip('Tambahkan ke Layar Utama')}.`, `Ketuk ${chip('Tambah')}.`] };
+        if (jenis === 'android') return { judul: 'HP / Tablet Android (Chrome)', langkah: [`Ketuk menu ${chip('⋮')} di kanan atas.`, `Pilih ${chip('Instal aplikasi')} atau ${chip('Tambahkan ke layar utama')}.`, `Ketuk ${chip('Instal')}.`] };
+        if (jenis === 'edge') return { judul: 'Laptop / Komputer (Edge)', langkah: [`Klik ikon instal ${chip('<i class="bi bi-plus-square"></i>')} di ujung kanan bilah alamat, atau menu ${chip('⋯')} → ${chip('Aplikasi')} → ${chip('Instal AgendaGuru')}.`, `Klik ${chip('Instal')}.`] };
+        return { judul: 'Laptop / Komputer (Chrome)', langkah: [`Klik ikon instal ${chip('<i class="bi bi-download"></i>')} di ujung kanan bilah alamat, atau menu ${chip('⋮')} → ${chip('Transmisikan, simpan, dan bagikan')} → ${chip('Instal AgendaGuru')}.`, `Klik ${chip('Instal')}.`] };
+    }
+
+    // paksa=true: dibuka dari menu Profil atau halaman pemasangan (selalu tampil).
     function tawarkanInstalAplikasi(paksa) {
         if (typeof Swal === 'undefined') return;
-        if (!paksa) {
-            if (aplikasiSudahTerpasang()) return;
-            const st = getInstallState();
-            if (st.status === 'nanti' && Date.now() - (st.at || 0) < 7 * 864e5) return;
-            if (Swal.isVisible()) return setTimeout(() => tawarkanInstalAplikasi(false), 4000);
+        if (dibukaSebagaiAplikasi()) {
+            setInstallState('terpasang');
+            if (paksa) Swal.fire('Sudah Terpasang', 'AgendaGuru sudah berjalan sebagai aplikasi di perangkat ini.', 'success');
+            return;
         }
+        if (!paksa) {
+            const st = getInstallState();
+            if (st.status === 'terpasang') return;
+            if (st.status === 'nanti' && Date.now() - (st.at || 0) < 7 * 864e5) return;
+        }
+        if (Swal.isVisible()) return setTimeout(() => tawarkanInstalAplikasi(paksa), 3000);
+
+        const native = !!window.AGENDA_NATIVE_GAS;
         const jenis = jenisPerangkat();
         const info = langkahInstal(jenis);
-        const lain = ['android', 'ios', jenis === 'edge' ? 'edge' : 'desktop'].filter(j => j !== jenis);
         const daftar = l => '<ol style="text-align:left;margin:6px 0 0;padding-left:20px;line-height:1.9">' + l.map(x => `<li>${x}</li>`).join('') + '</ol>';
-        const tombolAsli = installPromptEvent ? '<button type="button" id="btn-instal-asli" class="btn btn-primary w-100 mb-2"><i class="bi bi-download"></i> Instal Sekarang</button>' : '';
+        const kotak = (x, ikon) => `<div style="background:#E6F6F6;border-radius:10px;padding:12px 14px;text-align:left"><b><i class="bi bi-${ikon}"></i> ${x.judul}</b>${daftar(x.langkah)}</div>`;
+        const lain = ['android', 'ios', jenis === 'edge' ? 'edge' : 'desktop'].filter(j => j !== jenis);
+        const caraLain = `<details style="text-align:left;margin-top:10px"><summary style="cursor:pointer;font-weight:600">Cara untuk perangkat lain</summary>${lain.map(j => { const x = langkahInstal(j); return `<div style="margin-top:8px"><b>${x.judul}</b>${daftar(x.langkah)}</div>`; }).join('')}</details>`;
+
+        let isi;
+        if (native) {
+            // Dari link /exec: buka halaman pemasangan (otomatis terhubung ke Apps Script ini)
+            isi = `<p class="text-muted mb-3">Pasang AgendaGuru sebagai aplikasi agar bisa dibuka dari ikon di layar HP, tablet, atau laptop, layar penuh tanpa bilah alamat.</p>
+                <a id="btn-buka-instal" href="${alamatPemasangan()}" target="_blank" rel="noopener" class="btn btn-primary w-100 mb-2"><i class="bi bi-download"></i> Buka Halaman Pemasangan</a>
+                <div class="small text-muted text-start">Halaman baru akan terbuka. Masuk dengan email &amp; password Anda, lalu ikuti tombol <b>Instal</b> yang muncul.</div>`;
+        } else if (installPromptEvent) {
+            isi = `<p class="text-muted mb-3">Pasang AgendaGuru agar bisa dibuka dari ikon di layar, layar penuh seperti aplikasi biasa.</p>
+                <button type="button" id="btn-instal-asli" class="btn btn-primary w-100 mb-2"><i class="bi bi-download"></i> Instal Sekarang</button>`;
+        } else {
+            isi = `<p class="text-muted mb-2">Pasang AgendaGuru agar bisa dibuka dari ikon di layar, layar penuh seperti aplikasi biasa.</p>
+                ${kotak(info, jenis === 'ios' || jenis === 'android' ? 'phone' : 'laptop')}${caraLain}`;
+        }
+
         Swal.fire({
-            title: 'Pasang AgendaGuru di perangkat Anda',
-            width: 560,
-            html: `<p class="text-muted mb-2">Buka AgendaGuru langsung dari ikon di layar, seperti aplikasi biasa. Bisa dipasang di HP, tablet, dan laptop.</p>
-                ${tombolAsli}
-                <div style="background:#E6F6F6;border-radius:10px;padding:12px 14px;text-align:left">
-                    <b><i class="bi bi-phone"></i> ${info.judul}</b>${daftar(info.langkah)}
-                </div>
-                <details style="text-align:left;margin-top:10px"><summary style="cursor:pointer;font-weight:600">Cara untuk perangkat lain</summary>
-                    ${lain.map(j => { const x = langkahInstal(j); return `<div style="margin-top:8px"><b>${x.judul}</b>${daftar(x.langkah)}</div>`; }).join('')}
-                </details>`,
-            showCancelButton: true,
+            title: 'Pasang Aplikasi AgendaGuru',
+            imageUrl: 'icon-192.png', imageWidth: 72, imageHeight: 72, imageAlt: 'AgendaGuru',
+            width: 540,
+            html: isi,
+            showConfirmButton: !native && !installPromptEvent,
             confirmButtonText: 'Sudah saya pasang',
+            showCancelButton: true,
             cancelButtonText: 'Nanti saja',
             reverseButtons: true,
             didOpen: () => {
                 const b = document.getElementById('btn-instal-asli');
                 if (b) b.onclick = async () => {
-                    try { installPromptEvent.prompt(); const r = await installPromptEvent.userChoice; if (r && r.outcome === 'accepted') { setInstallState('terpasang'); Swal.close(); } } catch (e) { }
-                    installPromptEvent = null;
+                    const ev = installPromptEvent; if (!ev) return;
+                    try {
+                        ev.prompt();
+                        const r = await ev.userChoice;
+                        installPromptEvent = null;
+                        if (r && r.outcome === 'accepted') { setInstallState('terpasang'); Swal.fire('Berhasil', 'AgendaGuru terpasang. Buka dari ikon di layar atau menu aplikasi.', 'success'); }
+                    } catch (e) { }
                 };
+                const l = document.getElementById('btn-buka-instal');
+                if (l) l.addEventListener('click', () => { setInstallState('nanti'); setTimeout(() => Swal.close(), 300); });
             }
         }).then(r => {
             if (r.isConfirmed) setInstallState('terpasang');
-            else if (r.dismiss) setInstallState('nanti');
+            else if (r.dismiss === Swal.DismissReason.cancel || r.dismiss === Swal.DismissReason.backdrop || r.dismiss === Swal.DismissReason.close || r.dismiss === Swal.DismissReason.esc) setInstallState('nanti');
         });
     }
+
+    // Dibuka dari "Buka Halaman Pemasangan" (?instal=1): tampilkan pemasangan setelah masuk
+    function mintaInstalDariAlamat() {
+        try {
+            const p = new URLSearchParams(location.search);
+            if (p.get('instal') !== '1') return false;
+            p.delete('instal');
+            const rest = p.toString();
+            history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+            return true;
+        } catch (e) { return false; }
+    }
+    var MINTA_INSTAL = mintaInstalDariAlamat();
 
     function toggleAuthMode(mode) {
         if (mode === 'register') {

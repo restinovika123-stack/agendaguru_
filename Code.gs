@@ -224,7 +224,9 @@ function doPost(e) {
 }
 
 function getServerInfo() {
-  return { app: 'AgendaGuru', apiVersion: API_VERSION, registered: isRegistered_(), scriptId: ScriptApp.getScriptId() };
+  let url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { }
+  return { app: 'AgendaGuru', apiVersion: API_VERSION, registered: isRegistered_(), scriptId: ScriptApp.getScriptId(), url: url };
 }
 
 /* =====================================================================
