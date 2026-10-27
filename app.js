@@ -718,6 +718,81 @@ window.AGENDA_GURU_LOADED = true;
         populateMapelSelects();
         updateProfileUI();
         switchView('beranda');
+        setTimeout(() => tawarkanInstalAplikasi(false), 1500);
+    }
+
+    // --- Ajakan memasang aplikasi (HP, tablet, laptop) ---
+    const INSTALL_KEY = 'agendaGuru_install';
+    let installPromptEvent = null;
+    window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPromptEvent = e; });
+    window.addEventListener('appinstalled', () => setInstallState('terpasang'));
+
+    function getInstallState() { try { return JSON.parse(localStorage.getItem(INSTALL_KEY) || '{}'); } catch (e) { return {}; } }
+    function setInstallState(status) { try { localStorage.setItem(INSTALL_KEY, JSON.stringify({ status, at: Date.now() })); } catch (e) { } }
+
+    function aplikasiSudahTerpasang() {
+        try {
+            if (['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'].some(m => window.matchMedia('(display-mode: ' + m + ')').matches)) return true;
+        } catch (e) { }
+        if (window.navigator.standalone === true) return true;
+        return getInstallState().status === 'terpasang';
+    }
+
+    function jenisPerangkat() {
+        const ua = navigator.userAgent || '';
+        if (/iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+        if (/Android/i.test(ua)) return 'android';
+        return /Edg\//.test(ua) ? 'edge' : 'desktop';
+    }
+
+    function langkahInstal(jenis) {
+        const chip = t => `<span style="display:inline-block;background:#EEF1F5;border:1px solid #DFE3EA;border-radius:6px;padding:0 7px;font-weight:700">${t}</span>`;
+        if (jenis === 'ios') return { judul: 'iPhone / iPad', langkah: [`Buka alamat aplikasi ini di <b>Safari</b>.`, `Ketuk tombol Bagikan ${chip('<i class="bi bi-box-arrow-up"></i>')} di bawah/atas layar.`, `Pilih ${chip('Tambahkan ke Layar Utama')}, lalu ketuk ${chip('Tambah')}.`] };
+        if (jenis === 'android') return { judul: 'HP / Tablet Android', langkah: [`Buka alamat aplikasi ini di <b>Google Chrome</b>.`, `Ketuk menu ${chip('⋮')} di kanan atas.`, `Pilih ${chip('Tambahkan ke layar utama')}, lalu ketuk ${chip('Tambahkan')} / ${chip('Instal')}.`] };
+        if (jenis === 'edge') return { judul: 'Laptop / Komputer (Microsoft Edge)', langkah: [`Klik menu ${chip('⋯')} di kanan atas.`, `Pilih ${chip('Aplikasi')} → ${chip('Instal situs ini sebagai aplikasi')}.`, `Klik ${chip('Instal')}.`] };
+        return { judul: 'Laptop / Komputer (Google Chrome)', langkah: [`Klik menu ${chip('⋮')} di kanan atas.`, `Pilih ${chip('Transmisikan, simpan, dan bagikan')} → ${chip('Instal halaman sebagai aplikasi')}.`, `Klik ${chip('Instal')}. Ikon AgendaGuru akan muncul di desktop.`] };
+    }
+
+    // paksa=true: dibuka dari menu (selalu tampil). paksa=false: otomatis setelah masuk aplikasi.
+    function tawarkanInstalAplikasi(paksa) {
+        if (typeof Swal === 'undefined') return;
+        if (!paksa) {
+            if (aplikasiSudahTerpasang()) return;
+            const st = getInstallState();
+            if (st.status === 'nanti' && Date.now() - (st.at || 0) < 7 * 864e5) return;
+            if (Swal.isVisible()) return setTimeout(() => tawarkanInstalAplikasi(false), 4000);
+        }
+        const jenis = jenisPerangkat();
+        const info = langkahInstal(jenis);
+        const lain = ['android', 'ios', jenis === 'edge' ? 'edge' : 'desktop'].filter(j => j !== jenis);
+        const daftar = l => '<ol style="text-align:left;margin:6px 0 0;padding-left:20px;line-height:1.9">' + l.map(x => `<li>${x}</li>`).join('') + '</ol>';
+        const tombolAsli = installPromptEvent ? '<button type="button" id="btn-instal-asli" class="btn btn-primary w-100 mb-2"><i class="bi bi-download"></i> Instal Sekarang</button>' : '';
+        Swal.fire({
+            title: 'Pasang AgendaGuru di perangkat Anda',
+            width: 560,
+            html: `<p class="text-muted mb-2">Buka AgendaGuru langsung dari ikon di layar, seperti aplikasi biasa. Bisa dipasang di HP, tablet, dan laptop.</p>
+                ${tombolAsli}
+                <div style="background:#E6F6F6;border-radius:10px;padding:12px 14px;text-align:left">
+                    <b><i class="bi bi-phone"></i> ${info.judul}</b>${daftar(info.langkah)}
+                </div>
+                <details style="text-align:left;margin-top:10px"><summary style="cursor:pointer;font-weight:600">Cara untuk perangkat lain</summary>
+                    ${lain.map(j => { const x = langkahInstal(j); return `<div style="margin-top:8px"><b>${x.judul}</b>${daftar(x.langkah)}</div>`; }).join('')}
+                </details>`,
+            showCancelButton: true,
+            confirmButtonText: 'Sudah saya pasang',
+            cancelButtonText: 'Nanti saja',
+            reverseButtons: true,
+            didOpen: () => {
+                const b = document.getElementById('btn-instal-asli');
+                if (b) b.onclick = async () => {
+                    try { installPromptEvent.prompt(); const r = await installPromptEvent.userChoice; if (r && r.outcome === 'accepted') { setInstallState('terpasang'); Swal.close(); } } catch (e) { }
+                    installPromptEvent = null;
+                };
+            }
+        }).then(r => {
+            if (r.isConfirmed) setInstallState('terpasang');
+            else if (r.dismiss) setInstallState('nanti');
+        });
     }
 
     function toggleAuthMode(mode) {
