@@ -40,6 +40,13 @@ window.AGENDA_GURU_LOADED = true;
     let editingKokuId = null;
     let editingPoinId = null;
 
+    // Tanggal hari ini menurut jam perangkat (bukan UTC). toISOString() memberi tanggal
+    // kemarin jika dipakai sebelum pukul 07.00 WIB.
+    function tanggalHariIni() {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
     function toggleSidebar() {
         document.getElementById('sidebar-menu').classList.toggle('show');
         document.getElementById('sidebar-overlay').classList.toggle('show');
@@ -758,9 +765,9 @@ window.AGENDA_GURU_LOADED = true;
         if (viewId === 'nilai') loadNilaiData();
         if (viewId === 'kokurikuler') { switchKokuTab('input'); renderKokuDimensi(); loadKokuHistory(); }
         if (viewId === 'ekstrakurikuler') { switchEkskulTab('input'); loadEkskulData(); }
-        if (viewId === 'jurnal') { switchJurnalTab('input'); renderJurnal(); if (document.getElementById('jurnal-date')) document.getElementById('jurnal-date').value = new Date().toISOString().split('T')[0]; }
+        if (viewId === 'jurnal') { switchJurnalTab('input'); renderJurnal(); if (document.getElementById('jurnal-date')) document.getElementById('jurnal-date').value = tanggalHariIni(); }
         if (viewId === 'jadwal') renderSchedule();
-        if (viewId === 'poin') { switchPoinTab('input'); loadPoinData(); if (document.getElementById('poin-tanggal')) document.getElementById('poin-tanggal').value = new Date().toISOString().split('T')[0]; }
+        if (viewId === 'poin') { switchPoinTab('input'); loadPoinData(); if (document.getElementById('poin-tanggal')) document.getElementById('poin-tanggal').value = tanggalHariIni(); }
         if (viewId === 'rapor') loadRaporViewData();
         if (viewId === 'pengolah') loadPengolahView();
         if (viewId === 'rekap') loadRekapView();
@@ -772,7 +779,7 @@ window.AGENDA_GURU_LOADED = true;
     function populateClassSelects() {
         // Untuk pilihan Manajemen Kelas yang hanya menampilkan kelas spesifik (tanpa "Semua Kelas")
         let optsManajemen = '<option value="">-- Pilih Kelas --</option>';
-        db.classes.forEach(c => optsManajemen += `<option value="${c.ClassID}">${c.ClassName}</option>`);
+        db.classes.forEach(c => optsManajemen += `<option value="${escapeHtml(c.ClassID)}">${escapeHtml(c.ClassName)}</option>`);
         const elManajemen = document.getElementById('select-kelas-manajemen');
         if (elManajemen) {
             let currentVal = elManajemen.value;
@@ -807,7 +814,7 @@ window.AGENDA_GURU_LOADED = true;
         // Untuk pilihan filter di menu lainnya (dengan tambahan opsi "Semua Kelas")
         const selects = ['absen-kelas', 'nilai-kelas', 'koku-kelas', 'koku-riwayat-kelas', 'sched-class', 'filter-sched-class', 'jurnal-kelas', 'filter-jurnal-kelas', 'poin-kelas', 'filter-poin-kelas', 'ekskul-riwayat-kelas'];
         let optsAll = '<option value="">-- Pilih Kelas --</option><option value="All">Semua Kelas</option>';
-        db.classes.forEach(c => optsAll += `<option value="${c.ClassID}">${c.ClassName}</option>`);
+        db.classes.forEach(c => optsAll += `<option value="${escapeHtml(c.ClassID)}">${escapeHtml(c.ClassName)}</option>`);
         selects.forEach(id => {
             let el = document.getElementById(id);
             if (el) {
@@ -969,7 +976,7 @@ window.AGENDA_GURU_LOADED = true;
                 todaySchedules.forEach(s => {
                     let className = s.ClassID === 'All' ? 'Semua Kelas' : (db.classes.find(c => c.ClassID === s.ClassID)?.ClassName || s.ClassID);
                     let statusBadge = currentTime > s.TimeEnd ? `<span class="badge bg-secondary rounded-pill">Selesai</span>` : (currentTime >= s.TimeStart && currentTime <= s.TimeEnd ? `<span class="badge bg-success rounded-pill placeholder-glow"><span class="placeholder col-12 px-2">Berlangsung</span></span>` : `<span class="badge bg-primary rounded-pill">Akan Datang</span>`);
-                    htmlJadwal += `<li class="list-group-item d-flex justify-content-between align-items-center py-3"><div><span class="text-warning fw-bold me-2 fs-5"><i class="bi bi-clock"></i> ${s.TimeStart}</span> <span class="fw-bold">${s.Subject}</span> <small class="text-muted ms-1">(${className})</small></div>${statusBadge}</li>`;
+                    htmlJadwal += `<li class="list-group-item d-flex justify-content-between align-items-center py-3"><div><span class="text-warning fw-bold me-2 fs-5"><i class="bi bi-clock"></i> ${s.TimeStart}</span> <span class="fw-bold">${escapeHtml(s.Subject)}</span> <small class="text-muted ms-1">(${escapeHtml(className)})</small></div>${statusBadge}</li>`;
                 });
                 dashboardJadwal.innerHTML = htmlJadwal;
             }
@@ -1205,7 +1212,7 @@ window.AGENDA_GURU_LOADED = true;
             bodyEl.innerHTML = `
                 <div class="text-center mb-3">
                     <div class="avatar-circle mx-auto mb-2" style="width: 60px; height: 60px; border-radius: 50%; background: var(--teal-light); color: var(--teal-accent); display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold;">
-                        ${(s.StudentName || '?').charAt(0).toUpperCase()}
+                        ${escapeHtml((s.StudentName || '?').charAt(0).toUpperCase())}
                     </div>
                     <h5 class="fw-bold mb-0 text-dark">${escapeHtml(s.StudentName)}</h5>
                     <span class="badge bg-primary mt-1">Kelas ${escapeHtml(className)}</span>
@@ -1491,7 +1498,7 @@ window.AGENDA_GURU_LOADED = true;
             const nis = s.NIS || '-';
             const nisn = s.NISN || '-';
             const jkBadge = s.JenisKelamin === 'P' ? '<span class="badge bg-danger-subtle text-danger border border-danger-subtle">P</span>' : '<span class="badge bg-primary-subtle text-primary border border-primary-subtle">L</span>';
-            const phoneText = s.ParentPhone ? `<a href="https://wa.me/${s.ParentPhone.replace(/^0/, '62')}" target="_blank" class="text-decoration-none text-success small"><i class="bi bi-whatsapp"></i> ${s.ParentPhone}</a>` : '<small class="text-muted fst-italic">Belum ada no. WA</small>';
+            const phoneText = s.ParentPhone ? `<a href="https://wa.me/${encodeURIComponent(String(s.ParentPhone).replace(/\D/g, '').replace(/^0/, '62'))}" target="_blank" rel="noopener" class="text-decoration-none text-success small"><i class="bi bi-whatsapp"></i> ${escapeHtml(s.ParentPhone)}</a>` : '<small class="text-muted fst-italic">Belum ada no. WA</small>';
             const ortuName = s.NamaAyah || s.NamaIbu || s.NamaWali || '-';
             const chkDisabled = s.ParentPhone ? '' : 'disabled';
 
@@ -1552,7 +1559,7 @@ window.AGENDA_GURU_LOADED = true;
 
         let tbody = '';
         stds.forEach(s => {
-            tbody += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${s.StudentName}
+            tbody += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${escapeHtml(s.StudentName)}
                 <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="sendWAAbsen('${s.StudentID}')" title="Kirim WA Orang Tua"><i class="bi bi-whatsapp"></i></button>
                 </td>`;
             let sAtt = savedAttendance[s.StudentID] || Array(colCount).fill('-');
@@ -1713,7 +1720,7 @@ window.AGENDA_GURU_LOADED = true;
             }
             html += '</tr></thead><tbody>';
             stds.forEach(s => {
-                html += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${s.StudentName}
+                html += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${escapeHtml(s.StudentName)}
                     <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="sendWANilai('${s.StudentID}')" title="Kirim WA Orang Tua"><i class="bi bi-whatsapp"></i></button>
                     </td>`;
                 let grades = sGrades[s.StudentID] || Array(colCount).fill('');
@@ -1726,7 +1733,7 @@ window.AGENDA_GURU_LOADED = true;
             const jenisLabel = jenis === 'SumatifLM' ? 'Penilaian Tengah Semester' : (jenis === 'SumatifAS' ? 'Penilaian Akhir Semester' : jenis);
             html += `<table class="table table-bordered" id="table-nilai-input"><thead class="table-primary"><tr><th width="30%">Nama Siswa</th><th>Nilai ${jenisLabel}</th></tr></thead><tbody>`;
             stds.forEach(s => {
-                html += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${s.StudentName}
+                html += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${escapeHtml(s.StudentName)}
                     <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="sendWANilai('${s.StudentID}')" title="Kirim WA Orang Tua"><i class="bi bi-whatsapp"></i></button>
                     </td><td><input type="number" class="form-control w-50 input-nilai-val" data-sid="${s.StudentID}" value="${sGrades[s.StudentID] ? sGrades[s.StudentID][0] : ''}" oninput="calculateStatsNilai()"></td></tr>`;
             });
@@ -2954,7 +2961,7 @@ window.AGENDA_GURU_LOADED = true;
         document.getElementById('setting-rapor-alamat').value = db.config.schoolAddress || '';
         document.getElementById('setting-rapor-kota').value = db.config.schoolCity || '';
         document.getElementById('setting-rapor-fase').value = db.config.raporFase || 'D';
-        document.getElementById('setting-rapor-tanggal').value = db.config.raporTanggal || new Date().toISOString().split('T')[0];
+        document.getElementById('setting-rapor-tanggal').value = db.config.raporTanggal || tanggalHariIni();
         document.getElementById('setting-rapor-wali-nama').value = db.config.userName || '';
         document.getElementById('setting-rapor-wali-nip').value = db.config.userNIP || '';
         document.getElementById('setting-rapor-kepsek-nama').value = db.config.headmasterName || '';
@@ -3382,7 +3389,7 @@ window.AGENDA_GURU_LOADED = true;
 
         const fase = db.config.raporFase || 'D';
         const kota = db.config.schoolCity || RAPOR_KOSONG;
-        const tglStr = db.config.raporTanggal || new Date().toISOString().split('T')[0];
+        const tglStr = db.config.raporTanggal || tanggalHariIni();
         const sekolah = db.config.userSchool || RAPOR_KOSONG;
         const alamat = db.config.schoolAddress || RAPOR_KOSONG;
         const waliNama = db.config.userName || RAPOR_KOSONG;
@@ -3774,7 +3781,7 @@ window.AGENDA_GURU_LOADED = true;
 
         const fase = db.config.raporFase || 'D';
         const kota = db.config.schoolCity || RAPOR_KOSONG;
-        const tglStr = db.config.raporTanggal || new Date().toISOString().split('T')[0];
+        const tglStr = db.config.raporTanggal || tanggalHariIni();
         const sekolah = db.config.userSchool || RAPOR_KOSONG;
         const alamat = db.config.schoolAddress || RAPOR_KOSONG;
         const waliNama = db.config.userName || RAPOR_KOSONG;
@@ -4471,7 +4478,7 @@ window.AGENDA_GURU_LOADED = true;
         });
         document.getElementById('koku-dimensi-container').innerHTML = html;
         if (!document.getElementById('koku-tanggal').value) {
-            document.getElementById('koku-tanggal').value = new Date().toISOString().split('T')[0];
+            document.getElementById('koku-tanggal').value = tanggalHariIni();
         }
     }
 
@@ -4537,7 +4544,7 @@ window.AGENDA_GURU_LOADED = true;
         stds.forEach((s, i) => {
             html += `<tr data-sid="${s.StudentID}" class="koku-row">
                 <td class="text-center">${i + 1}</td>
-                <td class="fw-bold text-primary">${s.StudentName}</td>
+                <td class="fw-bold text-primary">${escapeHtml(s.StudentName)}</td>
                 <td>
                     <select class="form-select form-select-sm koku-cat-select" onchange="updateKokuNarasi(this)">
                         <option value="">Pilih Predikat</option>
@@ -4563,7 +4570,7 @@ window.AGENDA_GURU_LOADED = true;
         const proj = window.activeKokuProject;
         let dimStr = proj.selectedDims.length > 1 ? proj.selectedDims.slice(0, -1).join(', ') + ' dan ' + proj.selectedDims.slice(-1) : proj.selectedDims[0];
         let saran = cat === 'Sangat Baik' ? 'Terus pertahankan inisiatif dan kepemimpinan ini.' : cat === 'Baik' ? 'Kembangkan terus potensi dan keaktifan ini.' : cat === 'Cukup' ? 'Perlu ditingkatkan fokus dan konsistensi belajarnya.' : 'Sangat disarankan lebih aktif bertanya dan berkolaborasi.';
-        narasiContainer.innerHTML = `Ananda <strong>${sName}</strong> menunjukkan profil <strong>${dimStr}</strong> yang <strong>${cat.toLowerCase()}</strong> dalam kegiatan ${proj.p}. ${proj.desc} ${saran}`; 
+        narasiContainer.innerHTML = `Ananda <strong>${escapeHtml(sName)}</strong> menunjukkan profil <strong>${dimStr}</strong> yang <strong>${cat.toLowerCase()}</strong> dalam kegiatan ${escapeHtml(proj.p)}. ${escapeHtml(proj.desc)} ${saran}`; 
         narasiContainer.classList.remove('text-muted');
     }
 
@@ -4594,7 +4601,7 @@ window.AGENDA_GURU_LOADED = true;
             const narasi = saved ? saved.Narasi : 'Pilih kategori...';
             html += `<tr data-sid="${s.StudentID}" class="koku-row">
                 <td class="text-center">${i + 1}</td>
-                <td class="fw-bold text-primary">${s.StudentName}</td>
+                <td class="fw-bold text-primary">${escapeHtml(s.StudentName)}</td>
                 <td>
                     <select class="form-select form-select-sm koku-cat-select" onchange="updateKokuNarasi(this)">
                         <option value="">Pilih</option>
@@ -4881,7 +4888,7 @@ window.AGENDA_GURU_LOADED = true;
             doc.text('Kepala Sekolah', colLeft, finalY + 4.5);
 
             // Kolom Kanan: Fasilitator / Guru
-            const signDateStr = formatTanggalIndo(new Date().toISOString().split('T')[0]).replace(/^[A-Za-z]+,s*/, '');
+            const signDateStr = formatTanggalIndo(tanggalHariIni()).replace(/^[A-Za-z]+,\s*/, '');
             doc.text(`...................., ${signDateStr}`, colRight, finalY);
             doc.text('Fasilitator Projek / Guru Kelas,', colRight, finalY + 4.5);
 
@@ -4982,7 +4989,7 @@ window.AGENDA_GURU_LOADED = true;
 
             const dateInput = document.getElementById('jurnal-date');
             if (dateInput && !dateInput.value) {
-                dateInput.value = new Date().toISOString().split('T')[0];
+                dateInput.value = tanggalHariIni();
             }
         }
     }
@@ -5176,8 +5183,8 @@ window.AGENDA_GURU_LOADED = true;
             html += `<tr>
                 <td class="fw-bold">${j.Date}</td>
                 <td><span class="badge bg-light text-primary border">${classBadge}</span></td>
-                <td class="fw-semibold text-primary">${j.Subject}</td>
-                <td><small class="text-secondary">${j.Content}</small></td>
+                <td class="fw-semibold text-primary">${escapeHtml(j.Subject)}</td>
+                <td><small class="text-secondary">${escapeHtml(j.Content)}</small></td>
                 <td>${attachHtml}</td>
                 <td class="text-nowrap text-center">
                     <button class="btn btn-sm btn-outline-primary me-1 mb-1" onclick="editJournal('${j.RecordID}')" title="Edit Jurnal"><i class="bi bi-pencil-square"></i> Edit</button>
@@ -5553,7 +5560,7 @@ window.AGENDA_GURU_LOADED = true;
             doc.text('Kepala Sekolah', colLeft, finalY + 4.5);
 
             // Kolom Kanan: Guru Pengampu
-            const signDateStr = formatTanggalIndo(new Date().toISOString().split('T')[0]).replace(/^[A-Za-z]+,\s*/, '');
+            const signDateStr = formatTanggalIndo(tanggalHariIni()).replace(/^[A-Za-z]+,\s*/, '');
             doc.text(`...................., ${signDateStr}`, colRight, finalY);
             doc.text('Guru Kelas / Mata Pelajaran,', colRight, finalY + 4.5);
 
@@ -5648,7 +5655,7 @@ window.AGENDA_GURU_LOADED = true;
                                     <button class="btn btn-sm btn-link text-danger p-0" onclick="deleteSchedule('${s.RecordID}')" title="Hapus Jadwal"><i class="bi bi-trash"></i></button>
                                 </div>
                             </div>
-                            <div class="fw-semibold text-primary">${s.Subject}</div>
+                            <div class="fw-semibold text-primary">${escapeHtml(s.Subject)}</div>
                             <small class="text-muted fw-bold" style="font-size:0.75rem">${className}</small>
                         </li>`;
                 });
@@ -5937,7 +5944,7 @@ window.AGENDA_GURU_LOADED = true;
         }
 
         let opts = '<option value="">-- Pilih Siswa --</option>';
-        students.forEach(s => opts += `<option value="${s.StudentID}">${s.StudentName}</option>`);
+        students.forEach(s => opts += `<option value="${escapeHtml(s.StudentID)}">${escapeHtml(s.StudentName)}</option>`);
         select.innerHTML = opts;
 
         // Sinkronkan juga filter kelas riwayat
@@ -6235,7 +6242,7 @@ window.AGENDA_GURU_LOADED = true;
         const curMonth = curDate.getMonth() + 1;
         const academicYear = curMonth >= 7 ? `${curYear}/${curYear + 1}` : `${curYear - 1}/${curYear}`;
         const semester = curMonth >= 7 ? 'Ganjil' : 'Genap';
-        const signDateStr = formatTanggalIndo(new Date().toISOString().split('T')[0]).replace(/^[A-Za-z]+,\s*/, '');
+        const signDateStr = formatTanggalIndo(tanggalHariIni()).replace(/^[A-Za-z]+,\s*/, '');
 
         let filterLabel = 'Semua Kategori';
         if (jenisFilter === 'reward') filterLabel = 'Hanya Reward / Prestasi (+)';
@@ -6655,7 +6662,7 @@ window.AGENDA_GURU_LOADED = true;
             doc.text('Kepala Sekolah', colLeft, finalY + 4.5);
 
             // Kolom Kanan: Guru Pengampu / BK
-            const signDateStr = formatTanggalIndo(new Date().toISOString().split('T')[0]).replace(/^[A-Za-z]+,s*/, '');
+            const signDateStr = formatTanggalIndo(tanggalHariIni()).replace(/^[A-Za-z]+,\s*/, '');
             doc.text(`...................., ${signDateStr}`, colRight, finalY);
             doc.text('Guru Kelas / Guru Bimbingan Konseling,', colRight, finalY + 4.5);
 
@@ -6779,7 +6786,7 @@ window.AGENDA_GURU_LOADED = true;
             let student = db.students.find(s => s.StudentID === chk.value);
             if (student && student.ParentPhone) {
                 broadcastQueue.push(student);
-                htmlList += `<li class="list-group-item px-3 py-2 small d-flex align-items-center" id="br-item-${student.StudentID}"><i class="bi bi-clock-history text-secondary me-2 fs-5"></i> <div><span class="fw-bold">${student.StudentName}</span><br><small class="text-muted">${student.ParentPhone}</small></div></li>`;
+                htmlList += `<li class="list-group-item px-3 py-2 small d-flex align-items-center" id="br-item-${student.StudentID}"><i class="bi bi-clock-history text-secondary me-2 fs-5"></i> <div><span class="fw-bold">${escapeHtml(student.StudentName)}</span><br><small class="text-muted">${escapeHtml(student.ParentPhone)}</small></div></li>`;
             }
         });
 
@@ -6822,7 +6829,7 @@ window.AGENDA_GURU_LOADED = true;
         // Coret siswa dari antrean karena link WA sudah dibuka
         let liElem = document.getElementById(`br-item-${student.StudentID}`);
         if (liElem) {
-            liElem.innerHTML = `<i class="bi bi-check-circle-fill text-success me-2 fs-5"></i> <div><s class="fw-bold">${student.StudentName}</s><br><small class="text-muted">${student.ParentPhone}</small></div>`;
+            liElem.innerHTML = `<i class="bi bi-check-circle-fill text-success me-2 fs-5"></i> <div><s class="fw-bold">${escapeHtml(student.StudentName)}</s><br><small class="text-muted">${escapeHtml(student.ParentPhone)}</small></div>`;
             liElem.classList.add('bg-light');
         }
 

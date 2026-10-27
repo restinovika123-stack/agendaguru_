@@ -5,13 +5,37 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgendaGuru - Manajemen Kelas Digital</title>
-    <script src="api.js?v=20261027045326"></script>
+    <script src="api.js?v=20261027050154"></script>
 
     <script>
-        // Global error handler to catch any JS errors causing a blank screen
-        window.addEventListener('error', function (e) {
-            document.body.innerHTML = '<div style="padding: 20px; color: red; font-family: sans-serif;"><h3>Aplikasi Mengalami Kesalahan (Error)</h3><p><strong>Pesan:</strong> ' + e.message + '</p><p><strong>Lokasi:</strong> Baris ' + e.lineno + ' Kolom ' + e.colno + '</p><p>Harap tangkap layar (screenshot) pesan ini dan berikan ke pengembang.</p></div>';
-        });
+        // Penangkap error global.
+        // - Sebelum aplikasi tampil: tampilkan halaman error agar layar tidak putih kosong.
+        // - Setelah aplikasi berjalan: cukup pemberitahuan kecil, aplikasi & data tetap bisa dipakai.
+        (function () {
+            function esc(s) { return String(s || '').replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+            function appStarted() {
+                var a = document.getElementById('app-view'), l = document.getElementById('login-view');
+                return (a && a.style.display === 'block') || (l && l.style.display === 'block');
+            }
+            var toastShown = false;
+            window.addEventListener('error', function (e) {
+                // Error dari skrip pihak luar (CDN/ekstensi browser) tidak membawa detail; abaikan.
+                if (!e || e.message === 'Script error.' || (e.filename && e.filename.indexOf(location.origin) !== 0)) return;
+                if (!appStarted()) {
+                    document.body.innerHTML = '<div style="padding:20px;color:#b42318;font-family:sans-serif;max-width:640px;margin:40px auto"><h3>Aplikasi gagal dimuat</h3><p>Coba muat ulang halaman (Ctrl+F5). Jika masih gagal, kirim tangkapan layar ini ke pengembang.</p><p><strong>Pesan:</strong> ' + esc(e.message) + '</p><p><strong>Lokasi:</strong> Baris ' + e.lineno + ' Kolom ' + e.colno + '</p></div>';
+                    return;
+                }
+                if (toastShown) return;
+                toastShown = true;
+                var t = document.createElement('div');
+                t.setAttribute('role', 'alert');
+                t.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:5000;max-width:360px;background:#fff;border:1px solid #f5c2c0;border-left:4px solid #C44747;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.15);padding:12px 14px;font:14px system-ui,sans-serif;color:#172B4D';
+                t.innerHTML = '<b>Terjadi kesalahan kecil.</b><br>Data Anda tetap aman. Jika fitur ini tidak berjalan, muat ulang halaman.<div style="color:#6b778c;font-size:12px;margin-top:6px">' + esc(e.message) + '</div><button type="button" style="margin-top:8px;border:0;background:#172B4D;color:#fff;border-radius:6px;padding:4px 12px;cursor:pointer">Tutup</button>';
+                t.querySelector('button').onclick = function () { t.remove(); toastShown = false; };
+                document.body.appendChild(t);
+                setTimeout(function () { if (t.parentNode) { t.remove(); toastShown = false; } }, 12000);
+            });
+        })();
     </script>
 
     <!-- PWA Meta Tags & Manifest -->
@@ -911,6 +935,24 @@
         ::-webkit-scrollbar-thumb:hover {
             background: var(--navy-secondary);
         }
+        /* Layar HP: pilihan TP & profil pindah ke baris kedua topbar agar tidak terpotong */
+        @media (max-width: 576px) {
+            .topbar {
+                flex-wrap: wrap;
+                row-gap: 10px;
+            }
+            .topbar > div:last-child {
+                width: 100%;
+                justify-content: space-between;
+                gap: 8px !important;
+            }
+            #global-tapel {
+                flex: 1 1 auto;
+                min-width: 0;
+                width: auto !important;
+            }
+        }
+
         /* Styling Lembar Rapor A4 & Cetak Dokumen */
         .rapor-paper-sheet {
             background: #ffffff;
@@ -1078,6 +1120,11 @@
                             <p class="text-center small mb-0 ag-connect-link" style="display:none"><a href="javascript:void(0)"
                                     class="text-secondary text-decoration-none"
                                     onclick="agendaGuruShowConnect()"><i class="bi bi-link-45deg"></i> Ganti alamat Apps Script</a></p>
+                            <p class="text-center small mt-2 mb-0 ag-connect-link" style="display:none">
+                                <a href="panduan.html" target="_blank" rel="noopener" class="text-secondary text-decoration-none"><i class="bi bi-book"></i> Panduan Pemasangan</a>
+                                &middot;
+                                <a href="privasi.html" target="_blank" rel="noopener" class="text-secondary text-decoration-none"><i class="bi bi-shield-lock"></i> Kebijakan Privasi</a>
+                            </p>
                         </form>
                     </div>
 
@@ -3326,7 +3373,7 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="app.js?v=20261027045326"></script>
+    <script src="app.js?v=20261027050154"></script>
     
 </body>
 
