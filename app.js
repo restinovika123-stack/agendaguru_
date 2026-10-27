@@ -821,7 +821,7 @@ window.AGENDA_GURU_LOADED = true;
         }
 
         // Untuk pilihan filter di menu lainnya (dengan tambahan opsi "Semua Kelas")
-        const selects = ['absen-kelas', 'nilai-kelas', 'koku-kelas', 'koku-riwayat-kelas', 'sched-class', 'filter-sched-class', 'jurnal-kelas', 'filter-jurnal-kelas', 'poin-kelas', 'filter-poin-kelas', 'ekskul-riwayat-kelas'];
+        const selects = ['sched-class', 'filter-sched-class', 'jurnal-kelas', 'filter-jurnal-kelas', 'filter-poin-kelas', 'ekskul-riwayat-kelas'];
         let optsAll = '<option value="">-- Pilih Kelas --</option><option value="All">Semua Kelas</option>';
         db.classes.forEach(c => optsAll += `<option value="${escapeHtml(c.ClassID)}">${escapeHtml(c.ClassName)}</option>`);
         selects.forEach(id => {
@@ -830,6 +830,16 @@ window.AGENDA_GURU_LOADED = true;
                 let val = el.value;
                 el.innerHTML = optsAll;
                 if (val) el.value = val;
+            }
+        });
+
+        // Menu yang datanya selalu per kelas (absensi, nilai, kokurikuler, input poin): tanpa "Semua Kelas"
+        ['absen-kelas', 'nilai-kelas', 'koku-kelas', 'koku-riwayat-kelas', 'poin-kelas'].forEach(id => {
+            let el = document.getElementById(id);
+            if (el) {
+                let val = el.value;
+                el.innerHTML = optsManajemen;
+                if (val && val !== 'All') el.value = val;
             }
         });
     }
