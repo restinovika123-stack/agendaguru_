@@ -14,6 +14,8 @@
 const FRONTEND_URL = 'https://restinovika123-stack.github.io/agendaguru_/';
 // Halaman panduan pemasangan untuk pembeli (landing page di Vercel)
 const GUIDE_URL = 'https://agendaguru-id.vercel.app';
+// Nomor WhatsApp penjual untuk meminta kode lisensi & bantuan (format internasional, tanpa +)
+const SUPPORT_WA = '6285788408882';
 // Naikkan angka ini jika fungsi API berubah, supaya frontend bisa memberi tahu guru
 // yang masih memakai Code.gs lama untuk memperbaruinya.
 // v2: koleksi tambahan otomatis (sheet "X_..."), dipakai Pengolah Nilai.
@@ -110,9 +112,22 @@ function doGet() {
   const configured = FRONTEND_URL.indexOf('USERNAME') === -1;
   const target = FRONTEND_URL + (FRONTEND_URL.indexOf('?') >= 0 ? '&' : '?') + 'api=' + encodeURIComponent(apiUrl);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  // Pemberitahuan kode lisensi hanya untuk Spreadsheet yang belum berlisensi
+  const belumBerlisensi = !PropertiesService.getScriptProperties().getProperty('LICENSE_KEY');
+  const waText = 'Halo, saya sudah memasang AgendaGuru dan ingin meminta Kode Lisensi.\nNama: \nEmail Google: ';
+  const waUrl = 'https://wa.me/' + SUPPORT_WA + '?text=' + encodeURIComponent(waText);
+  const noticeLisensi = belumBerlisensi
+    ? '<div class="lic">' +
+      '<div class="lic-title">🔑 Siapkan Kode Lisensi</div>' +
+      '<p>Saat membuat akun, aplikasi akan meminta <b>Kode Lisensi</b> (format <code>AG-XXXX-XXXX-XXXX</code>). ' +
+      'Belum punya atau belum menerima kodenya? Minta ke penjual lewat WhatsApp.</p>' +
+      '<a class="btn-wa" href="' + esc(waUrl) + '" target="_blank" rel="noopener">💬 Minta Kode Lisensi via WhatsApp</a>' +
+      '</div>'
+    : '';
   const body = configured
     ? '<h2>AgendaGuru siap dipakai</h2>' +
       '<p>Database Anda ada di Google Spreadsheet ini. Klik tombol di bawah untuk membuka aplikasi.</p>' +
+      noticeLisensi +
       '<p><a class="btn" href="' + esc(target) + '" target="_top">Buka AgendaGuru</a></p>' +
       '<p class="muted">Simpan (bookmark) halaman ini. Jika diminta alamat Apps Script di aplikasi, tempel alamat berikut:</p>' +
       '<input readonly value="' + esc(apiUrl) + '" onclick="this.select()">'
@@ -120,7 +135,11 @@ function doGet() {
   const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<style>body{font-family:system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;color:#172B4D}' +
     '.btn{display:inline-block;background:#159A9C;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:700}' +
-    '.muted{color:#6b778c;font-size:14px}input{width:100%;padding:10px;border:1px solid #ccd;border-radius:8px;font-size:13px}</style>' +
+    '.muted{color:#6b778c;font-size:14px}input{width:100%;padding:10px;border:1px solid #ccd;border-radius:8px;font-size:13px}' +
+    '.lic{background:#FFF7E6;border:1px solid #F5D9A8;border-radius:12px;padding:14px 16px;margin:18px 0}' +
+    '.lic-title{font-weight:800;margin-bottom:4px}.lic p{margin:0 0 12px;font-size:14px;line-height:1.5}' +
+    '.lic code{background:#fff;padding:1px 6px;border-radius:6px;border:1px solid #F5D9A8;white-space:nowrap}' +
+    '.btn-wa{display:inline-block;background:#25D366;color:#fff;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700}</style>' +
     '</head><body>' + body + '</body></html>';
   return HtmlService.createHtmlOutput(html)
     .setTitle('AgendaGuru')
