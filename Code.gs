@@ -21,7 +21,89 @@ const API_VERSION = 3;
 const LICENSE_SERVER_URL = 'https://script.google.com/macros/s/AKfycbzyQBF32jM2Gwr5ShNV1Ga2O3X3XqFed9OdPt8jgtparnbIMVozwZW2PJ2RiAJcS-7uTg/exec';
 
 /** Halaman pembuka: mengarahkan guru ke frontend GitHub sambil membawa alamat API ini. */
+/* =====================================================================
+ * SALINAN TEMPLATE
+ * Pembeli memakai "Buat salinan" dari template Spreadsheet milik penjual.
+ * Jika properti akun/sesi/lisensi ikut tersalin dari Spreadsheet lain,
+ * hapus agar pembeli memulai dengan akun & lisensinya sendiri.
+ * ===================================================================== */
+function guardCopiedProject_() {
+  const p = PropertiesService.getScriptProperties();
+  const sid = ScriptApp.getScriptId();
+  const tercatat = p.getProperty('PROJECT_SCRIPT_ID');
+  if (tercatat === sid) return;
+  if (tercatat) {
+    const all = p.getProperties();
+    Object.keys(all).forEach(k => { if (/^(AUTH_|SESS_|LICENSE_)/.test(k)) p.deleteProperty(k); });
+  }
+  p.setProperty('PROJECT_SCRIPT_ID', sid);
+}
+
+/** Menu "AgendaGuru" di Spreadsheet agar guru mudah membuka aplikasi. */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('AgendaGuru')
+    .addItem('Buka Aplikasi', 'menuBukaAplikasi')
+    .addItem('Cara Mengaktifkan Aplikasi', 'menuCaraAktifkan')
+    .addToUi();
+}
+
+function menuBukaAplikasi() {
+  let url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { }
+  if (!url || !/\/exec$/.test(url)) return menuCaraAktifkan();
+  const target = FRONTEND_URL + (FRONTEND_URL.indexOf('?') >= 0 ? '&' : '?') + 'api=' + encodeURIComponent(url);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:system-ui,sans-serif;color:#172B4D">' +
+    '<p style="margin-top:0">Klik tombol di bawah untuk membuka AgendaGuru. Simpan (bookmark) halamannya agar mudah dibuka lagi.</p>' +
+    '<p><a href="' + esc(target) + '" target="_blank" style="display:inline-block;background:#159A9C;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Buka AgendaGuru ↗</a></p>' +
+    '<p style="font-size:12px;color:#5E6C84">Alamat Aplikasi Web Anda (untuk dipakai di HP/laptop lain):</p>' +
+    '<input readonly value="' + esc(url) + '" onclick="this.select()" style="width:100%;padding:8px;border:1px solid #ccd;border-radius:6px;font-size:12px"></div>'
+  ).setWidth(460).setHeight(250);
+  SpreadsheetApp.getUi().showModalDialog(html, 'AgendaGuru');
+}
+
+function menuCaraAktifkan() {
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:system-ui,sans-serif;color:#172B4D;font-size:14px;line-height:1.6">' +
+    '<p style="margin-top:0">Aplikasi belum diaktifkan. Lakukan sekali saja:</p><ol style="padding-left:18px">' +
+    '<li>Klik menu <b>Ekstensi → Apps Script</b>.</li>' +
+    '<li>Klik tombol biru <b>Terapkan → Deployment baru</b>.</li>' +
+    '<li>Klik ⚙ di samping "Pilih jenis", pilih <b>Aplikasi web</b>.</li>' +
+    '<li>Jalankan sebagai: <b>Saya</b>. Yang memiliki akses: <b>Siapa saja</b>. Klik <b>Terapkan</b>.</li>' +
+    '<li>Izinkan akses (jika muncul peringatan: <b>Lanjutan → Buka (tidak aman) → Izinkan</b>).</li>' +
+    '<li>Kembali ke Spreadsheet ini, klik <b>AgendaGuru → Buka Aplikasi</b>.</li></ol>' +
+    '<p style="font-size:12px;color:#5E6C84">Panduan lengkap: <a href="' + FRONTEND_URL + 'panduan.html" target="_blank">' + FRONTEND_URL + 'panduan.html</a></p></div>'
+  ).setWidth(480).setHeight(380);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Cara Mengaktifkan AgendaGuru');
+}
+
+/**
+ * KHUSUS PENJUAL: jalankan sekali di Spreadsheet TEMPLATE sebelum dibagikan.
+ * Menghapus semua akun, sesi, lisensi, dan isi data, sehingga setiap salinan
+ * pembeli bersih. Jangan dijalankan di Spreadsheet yang dipakai mengajar.
+ */
+function bersihkanTemplate() {
+  const p = PropertiesService.getScriptProperties();
+  p.deleteAllProperties();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = ss.getSheets();
+  const keep = ss.insertSheet('Petunjuk_' + Date.now());
+  sheets.forEach(sh => ss.deleteSheet(sh));
+  keep.setName('Petunjuk');
+  keep.getRange(1, 1, 4, 1).setValues([
+    ['AgendaGuru — salinan Anda sendiri'],
+    ['1. Klik menu AgendaGuru → Cara Mengaktifkan Aplikasi (muncul beberapa detik setelah Spreadsheet dibuka).'],
+    ['2. Setelah aktif, buka aplikasi lewat menu AgendaGuru → Buka Aplikasi.'],
+    ['Data kelas, siswa, dan nilai akan tersimpan otomatis di Spreadsheet ini.']
+  ]);
+  keep.getRange(1, 1).setFontWeight('bold').setFontSize(14);
+  keep.setColumnWidth(1, 720);
+  console.log('Template bersih. Bagikan dengan akses "Siapa saja yang memiliki link: Pelihat" lalu kirim link .../copy ke pembeli.');
+}
+
 function doGet() {
+  guardCopiedProject_();
   const apiUrl = ScriptApp.getService().getUrl();
   const configured = FRONTEND_URL.indexOf('USERNAME') === -1;
   const target = FRONTEND_URL + (FRONTEND_URL.indexOf('?') >= 0 ? '&' : '?') + 'api=' + encodeURIComponent(apiUrl);
@@ -66,6 +148,7 @@ function doPost(e) {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const fn = Object.prototype.hasOwnProperty.call(api, req.fn) ? api[req.fn] : null;
     if (!fn) throw new Error('Fungsi tidak dikenal: ' + req.fn);
+    guardCopiedProject_();
     ensureDatabase_();
     out = { ok: true, result: fn.apply(null, Array.isArray(req.args) ? req.args : []) };
   } catch (err) {

@@ -49,41 +49,26 @@
             <div class="brand">Agenda<span>Guru</span></div>
             <h1>Panduan Pemasangan</h1>
             <p>Pasang sekali, lalu pakai di HP, tablet, dan laptop. Data tersimpan di Google Spreadsheet milik Anda sendiri.</p>
-            <span class="time">⏱ Sekitar 5–10 menit</span>
+            <span class="time">⏱ Sekitar 5 menit</span>
         </div>
     </header>
 
     <main class="wrap">
         <section class="step" aria-labelledby="s1">
-            <h2 id="s1"><span class="num">1</span> Buat Google Spreadsheet baru</h2>
+            <h2 id="s1"><span class="num">1</span> Buat salinan template</h2>
             <ol>
                 <li>Masuk ke akun Google (Gmail) Anda.</li>
-                <li>Klik tombol di bawah. Spreadsheet kosong baru akan terbuka.</li>
-                <li>Beri nama, misalnya <b>AgendaGuru – Nama Anda</b>.</li>
+                <li>Klik tombol di bawah, lalu klik <b>Buat salinan</b>.</li>
+                <li>Beri nama, misalnya <b>AgendaGuru – Nama Anda</b>. Spreadsheet salinan ini milik Anda sendiri dan menjadi tempat semua data tersimpan.</li>
             </ol>
-            <a class="btn teal" href="https://sheets.new" target="_blank" rel="noopener">Buka Spreadsheet Baru ↗</a>
+            <a class="btn teal" id="template-btn" href="https://docs.google.com/spreadsheets/d/16mjcXzslqxX77R_LUN1sduWjd2V5woadqYd34Ynvk5I/copy" target="_blank" rel="noopener">📄 Buat Salinan Template ↗</a>
+            <p style="margin:10px 0 0;font-size:.9rem;color:var(--muted)">Kode aplikasi sudah terpasang di template. Anda tidak perlu menyalin kode apa pun.</p>
         </section>
 
         <section class="step" aria-labelledby="s2">
-            <h2 id="s2"><span class="num">2</span> Salin kode aplikasi (Code.gs)</h2>
-            <p style="margin:0">Klik tombol ini. Seluruh kode akan tersalin otomatis.</p>
-            <button class="btn" type="button" id="copy-btn">📋 Salin Code.gs</button><span class="copy-msg" id="copy-msg" role="status" aria-live="polite"></span>
-            <p style="margin:10px 0 0;font-size:.9rem;color:var(--muted)">Jika tombol tidak berfungsi, buka <a href="Code.gs" target="_blank" rel="noopener">Code.gs</a>, tekan <code>Ctrl+A</code> lalu <code>Ctrl+C</code>.</p>
-        </section>
-
-        <section class="step" aria-labelledby="s3">
-            <h2 id="s3"><span class="num">3</span> Tempel di Apps Script</h2>
+            <h2 id="s2"><span class="num">2</span> Aktifkan sebagai Aplikasi Web</h2>
             <ol>
-                <li>Di Spreadsheet, klik menu <b>Ekstensi → Apps Script</b>.</li>
-                <li>Hapus semua tulisan yang ada (<code>function myFunction() {…}</code>).</li>
-                <li>Tempel kode dengan <code>Ctrl+V</code>, lalu klik ikon <b>Simpan</b> 💾.</li>
-            </ol>
-            <div class="note">Penting: buka Apps Script <b>dari menu Spreadsheet</b>, bukan dari script.google.com, agar data tersimpan di Spreadsheet ini.</div>
-        </section>
-
-        <section class="step" aria-labelledby="s4">
-            <h2 id="s4"><span class="num">4</span> Terapkan sebagai Aplikasi Web</h2>
-            <ol>
+                <li>Di Spreadsheet salinan Anda, klik menu <b>Ekstensi → Apps Script</b>.</li>
                 <li>Klik tombol biru <b>Terapkan → Deployment baru</b> (kanan atas).</li>
                 <li>Klik ikon ⚙ di samping "Pilih jenis", pilih <b>Aplikasi web</b>.</li>
                 <li>Isi pengaturan seperti ini, lalu klik <b>Terapkan</b>:</li>
@@ -94,21 +79,22 @@
             </div>
         </section>
 
-        <section class="step" aria-labelledby="s5">
-            <h2 id="s5"><span class="num">5</span> Izinkan akses</h2>
+        <section class="step" aria-labelledby="s3">
+            <h2 id="s3"><span class="num">3</span> Izinkan akses</h2>
             <ol>
                 <li>Klik <b>Izinkan akses</b>, lalu pilih akun Google Anda.</li>
                 <li>Jika muncul <i>"Google belum memverifikasi aplikasi ini"</i>, klik <b>Lanjutan</b> → <b>Buka (nama proyek) (tidak aman)</b> → <b>Izinkan</b>.</li>
+                <li>Klik <b>Selesai</b>.</li>
             </ol>
-            <div class="note">Peringatan ini wajar karena kodenya berjalan di akun Anda sendiri. Aplikasi hanya mengakses Spreadsheet ini, folder bukti foto di Drive, kalender Anda (jika fitur sinkron dipakai), serta menghubungi server lisensi untuk memeriksa kode lisensi.</div>
+            <div class="note">Peringatan ini wajar karena aplikasi berjalan di akun Anda sendiri. Aplikasi hanya mengakses Spreadsheet ini, folder bukti foto di Drive, kalender Anda (jika fitur sinkron dipakai), serta menghubungi server lisensi untuk memeriksa kode lisensi.</div>
         </section>
 
-        <section class="step" aria-labelledby="s6">
-            <h2 id="s6"><span class="num">6</span> Buka aplikasi &amp; daftar akun</h2>
+        <section class="step" aria-labelledby="s4">
+            <h2 id="s4"><span class="num">4</span> Buka aplikasi &amp; daftar akun</h2>
             <ol>
-                <li>Salin <b>URL Aplikasi web</b> yang muncul (berakhiran <code>/exec</code>) dan buka di browser.</li>
-                <li>Klik <b>Buka AgendaGuru</b>, lalu isi formulir <b>Daftar</b> beserta <b>Kode Lisensi</b> yang Anda terima dari penjual (format <code>AG-XXXX-XXXX-XXXX</code>).</li>
-                <li>Simpan (bookmark) alamat aplikasi. Di perangkat lain, buka alamat yang sama dan tempel URL <code>/exec</code> saat diminta.</li>
+                <li>Kembali ke Spreadsheet salinan Anda dan muat ulang (F5). Klik menu <b>AgendaGuru → Buka Aplikasi</b>, lalu <b>Buka AgendaGuru</b>.</li>
+                <li>Isi formulir <b>Daftar</b> beserta <b>Kode Lisensi</b> dari penjual (format <code>AG-XXXX-XXXX-XXXX</code>).</li>
+                <li>Simpan (bookmark) halaman aplikasi. Untuk HP/laptop lain, buka lagi menu <b>AgendaGuru → Buka Aplikasi</b> dan salin alamat yang tertera.</li>
                 <li>Isi <b>Cetak Rapor Siswa → Pengaturan Sekolah &amp; Titimangsa</b> agar rapor memuat data sekolah Anda.</li>
             </ol>
             <span style="display:inline-block;margin-top:10px;color:var(--ok);font-weight:700">✅ Selesai! Aplikasi siap dipakai.</span>
@@ -125,7 +111,12 @@
         </details>
         <details>
             <summary>Muncul tulisan "Code.gs di Spreadsheet Anda versi lama"</summary>
-            <p>Salin Code.gs terbaru (langkah 2), tempel ulang di Apps Script, lalu <b>Terapkan → Kelola deployment → ✏️ Edit → Versi: Versi baru → Terapkan</b>. Alamat aplikasi tidak berubah.</p>
+            <ol style="margin:8px 0 0;padding-left:20px;color:var(--muted)">
+                <li>Klik tombol ini untuk menyalin kode terbaru: <button class="btn" type="button" id="copy-btn" style="margin:6px 0">📋 Salin Code.gs</button><span class="copy-msg" id="copy-msg" role="status" aria-live="polite"></span></li>
+                <li>Di Spreadsheet Anda: <b>Ekstensi → Apps Script</b>, tekan <code>Ctrl+A</code>, hapus, lalu tempel (<code>Ctrl+V</code>) dan simpan.</li>
+                <li><b>Terapkan → Kelola deployment → ✏️ Edit → Versi: Versi baru → Terapkan</b>. Alamat aplikasi tidak berubah.</li>
+            </ol>
+            <p style="font-size:.9rem">Jika tombol tidak berfungsi, buka <a href="Code.gs" target="_blank" rel="noopener">Code.gs</a>, tekan <code>Ctrl+A</code> lalu <code>Ctrl+C</code>.</p>
         </details>
         <details>
             <summary>Kode lisensi ditolak</summary>

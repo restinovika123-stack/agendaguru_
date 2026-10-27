@@ -31,23 +31,30 @@
 5. Di GitHub: **Settings → Pages → Source: Deploy from a branch → Branch: main / (root) → Save**.
 6. Tunggu 1–2 menit, buka `https://restinovika123-stack.github.io/agendaguru_/`.
 
-## B. Untuk guru: pasang backend (sekali per guru)
+## B. Untuk Anda: siapkan TEMPLATE Spreadsheet (sekali, ulangi saat Code.gs diperbarui)
 
-1. Buat Google Spreadsheet baru (kosong).
-2. Menu **Ekstensi → Apps Script**. Hapus isi `Code.gs`, tempel seluruh isi `Code.gs` dari
-   `https://restinovika123-stack.github.io/agendaguru_/Code.gs`, lalu **Simpan**.
-3. **Terapkan → Deployment baru** → ikon roda gigi → **Aplikasi web**.
-   - Jalankan sebagai: **Saya**
-   - Yang memiliki akses: **Siapa saja**
-   - Klik **Terapkan**, lalu izinkan akses (Tinjau izin → pilih akun → Lanjutan → Buka).
-4. Buka **URL Aplikasi web** yang muncul → klik **Buka AgendaGuru** → **Daftar akun**.
-5. Simpan (bookmark) alamat GitHub aplikasi. Di HP/laptop lain cukup buka alamat yang sama,
-   lalu tempel URL Aplikasi web saat diminta (atau buka lewat URL Aplikasi web lagi).
+Pembeli cukup membuat salinan template. Kode aplikasi (Code.gs) ikut tersalin, jadi pembeli tidak perlu menyalin kode.
 
-Sheet database dibuat otomatis saat pertama dipakai.
+1. Buat Google Spreadsheet baru bernama **TEMPLATE AgendaGuru** (pakai akun penjual).
+2. **Ekstensi → Apps Script**. Hapus isinya, tempel seluruh isi `Code.gs` terbaru, lalu **Simpan**.
+3. Pilih fungsi **`bersihkanTemplate`** di bagian atas editor, klik **Jalankan**, lalu izinkan akses.
+   Semua akun, sesi, lisensi, dan isi data di template dihapus; tersisa sheet **Petunjuk** untuk pembeli.
+4. **Jangan** melakukan Deploy atau mendaftar akun di template ini.
+5. Klik **Bagikan** → *Akses umum*: **Siapa saja yang memiliki link** → **Pelihat**.
+6. Salin link template, lalu ganti bagian akhir `/edit...` menjadi `/copy`. Contoh:
+   `https://docs.google.com/spreadsheets/d/ID_TEMPLATE/copy`
+   Link ini dipasang di tombol **Buat Salinan Template** pada panduan.html.
 
-> Akun Google Workspace sekolah kadang melarang akses "Siapa saja". Jika gagal terhubung,
-> gunakan akun Gmail pribadi untuk Spreadsheet-nya.
+Setiap kali Code.gs diperbarui, ulangi langkah 2–3 di template agar pembeli baru langsung mendapat versi terbaru.
+
+### Yang dilakukan pembeli (lihat panduan.html)
+1. Klik **Buat Salinan Template** → **Buat salinan**.
+2. Di salinan: **Ekstensi → Apps Script → Terapkan → Deployment baru → Aplikasi web**
+   (Jalankan sebagai **Saya**, akses **Siapa saja**), lalu izinkan akses.
+3. Di Spreadsheet: menu **AgendaGuru → Buka Aplikasi**, lalu daftar akun dengan **Kode Lisensi**.
+
+> Pengaman: jika template terlanjur pernah dipakai, akun/sesi/lisensi yang ikut tersalin otomatis
+> dihapus saat salinan pertama kali dibuka, sehingga setiap pembeli memulai dengan akun sendiri.
 
 ## C. Memperbarui aplikasi
 
