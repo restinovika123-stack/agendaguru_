@@ -4248,6 +4248,8 @@ window.AGENDA_GURU_LOADED = true;
         if (document.getElementById('ekskul-tapel') && !document.getElementById('ekskul-tapel').value) {
             document.getElementById('ekskul-tapel').value = getActiveTapel(); // ikut TP yang dipilih di atas
         }
+        const elEkskulRiwayatSem = document.getElementById('ekskul-riwayat-semester');
+        if (elEkskulRiwayatSem && !elEkskulRiwayatSem.dataset.userSet) elEkskulRiwayatSem.value = defaultSem;
         const elEkskulSem = document.getElementById('ekskul-semester');
         if (elEkskulSem && !elEkskulSem.dataset.userSet) {
             elEkskulSem.value = defaultSem;
@@ -4256,7 +4258,7 @@ window.AGENDA_GURU_LOADED = true;
 
     // Semester yang dipilih sendiri oleh guru tidak ditimpa lagi oleh nilai bawaan
     document.addEventListener('change', e => {
-        if (e.target && (e.target.id === 'rapor-semester' || e.target.id === 'ekskul-semester')) e.target.dataset.userSet = '1';
+        if (e.target && (e.target.id === 'rapor-semester' || e.target.id === 'ekskul-semester' || e.target.id === 'ekskul-riwayat-semester')) e.target.dataset.userSet = '1';
     });
 
     function onEkskulClassChange() {
@@ -5157,7 +5159,7 @@ window.AGENDA_GURU_LOADED = true;
             return;
         }
 
-        let filtered = db.journal.filter(j => String(j.ClassID) === String(classFilter) || j.ClassID === 'All');
+        let filtered = db.journal.filter(j => classFilter === 'All' || String(j.ClassID) === String(classFilter) || j.ClassID === 'All');
 
         // Pencarian jika kata kunci diinput
         const searchInput = document.getElementById('search-jurnal-text');
@@ -5378,7 +5380,7 @@ window.AGENDA_GURU_LOADED = true;
         const cFilter = document.getElementById('filter-jurnal-kelas').value;
         if (!cFilter) return Swal.fire('Peringatan', 'Silakan pilih kelas terlebih dahulu sebelum mengunduh PDF!', 'warning');
 
-        let filtered = db.journal.filter(j => String(j.ClassID) === String(cFilter) || j.ClassID === 'All');
+        let filtered = db.journal.filter(j => cFilter === 'All' || String(j.ClassID) === String(cFilter) || j.ClassID === 'All');
         if (filtered.length === 0) return Swal.fire('Informasi', 'Belum ada catatan jurnal pada kelas yang dipilih.', 'info');
 
         // Urutkan data berdasarkan tanggal
@@ -5648,7 +5650,7 @@ window.AGENDA_GURU_LOADED = true;
         if (!cFilter) { container.innerHTML = `<div class="col-12 text-center text-muted py-5"><i class="bi bi-calendar-x" style="font-size: 3rem;"></i><p>Pilih kelas terlebih dahulu.</p></div>`; return; }
         let html = '';
         ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'].forEach(day => {
-            let daySch = db.schedule.filter(s => s.Day === day && (String(s.ClassID) === String(cFilter) || s.ClassID === 'All')).sort((a, b) => a.TimeStart.localeCompare(b.TimeStart));
+            let daySch = db.schedule.filter(s => s.Day === day && (cFilter === 'All' || String(s.ClassID) === String(cFilter) || s.ClassID === 'All')).sort((a, b) => a.TimeStart.localeCompare(b.TimeStart));
             html += `<div class="col-md-4 mb-4"><div class="card shadow-sm border-0 h-100"><div class="card-header bg-primary text-white fw-bold text-center py-2">${day}</div><ul class="list-group list-group-flush">`;
             if (daySch.length === 0) {
                 html += `<li class="list-group-item text-center text-muted small py-3">Libur / Kosong</li>`;
