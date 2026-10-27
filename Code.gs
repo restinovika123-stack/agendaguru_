@@ -55,13 +55,12 @@ function menuBukaAplikasi() {
   let url = '';
   try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { }
   if (!url || !/\/exec$/.test(url)) return menuCaraAktifkan();
-  const target = FRONTEND_URL + (FRONTEND_URL.indexOf('?') >= 0 ? '&' : '?') + 'api=' + encodeURIComponent(url);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
   const html = HtmlService.createHtmlOutput(
     '<div style="font-family:system-ui,sans-serif;color:#172B4D">' +
     '<p style="margin-top:0">Klik tombol di bawah untuk membuka AgendaGuru. Simpan (bookmark) halamannya agar mudah dibuka lagi.</p>' +
-    '<p><a href="' + esc(target) + '" target="_blank" style="display:inline-block;background:#159A9C;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Buka AgendaGuru ↗</a></p>' +
-    '<p style="font-size:12px;color:#5E6C84">Alamat Aplikasi Web Anda (untuk dipakai di HP/laptop lain):</p>' +
+    '<p><a href="' + esc(url) + '" target="_blank" style="display:inline-block;background:#159A9C;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Buka AgendaGuru ↗</a></p>' +
+    '<p style="font-size:12px;color:#5E6C84">Alamat aplikasi Anda (buka juga di HP/laptop lain):</p>' +
     '<input readonly value="' + esc(url) + '" onclick="this.select()" style="width:100%;padding:8px;border:1px solid #ccd;border-radius:6px;font-size:12px"></div>'
   ).setWidth(460).setHeight(250);
   SpreadsheetApp.getUi().showModalDialog(html, 'AgendaGuru');
@@ -106,8 +105,54 @@ function bersihkanTemplate() {
   console.log('Template bersih. Bagikan dengan akses "Siapa saja yang memiliki link: Pelihat" lalu kirim link .../copy ke pembeli.');
 }
 
-function doGet() {
+/**
+ * Mengambil tampilan aplikasi terbaru (index.html di GitHub) di sisi server, sehingga
+ * link /exec milik guru langsung membuka aplikasi. Disimpan di cache 5 menit agar cepat.
+ * Mengembalikan null bila gagal (halaman pembuka biasa dipakai sebagai cadangan).
+ */
+function loadFrontendHtml_() {
+  const cache = CacheService.getScriptCache();
+  const CHUNK = 90000, KEY = 'FE_HTML_';
+  try {
+    const n = Number(cache.get(KEY + 'N'));
+    if (n > 0) {
+      const parts = cache.getAll(Array.from({ length: n }, (_, i) => KEY + i));
+      const html = Array.from({ length: n }, (_, i) => parts[KEY + i]).join('');
+      if (html && html.indexOf('</html>') > 0) return html;
+    }
+  } catch (e) { }
+  try {
+    const stamp = Math.floor(Date.now() / 300000);
+    const res = UrlFetchApp.fetch(FRONTEND_URL + 'index.html?t=' + stamp, { muteHttpExceptions: true, followRedirects: true });
+    if (res.getResponseCode() !== 200) return null;
+    let html = res.getContentText('UTF-8');
+    if (html.indexOf('api.js') < 0 || html.indexOf('app.js') < 0) return null;
+    // File pendukung (api.js, app.js) dimuat dari alamat frontend
+    html = html.replace('<head>', '<head><base href="' + FRONTEND_URL + '" target="_self">');
+    try {
+      const items = {}; let i = 0;
+      for (let p = 0; p < html.length; p += CHUNK, i++) items[KEY + i] = html.slice(p, p + CHUNK);
+      items[KEY + 'N'] = String(i);
+      cache.putAll(items, 300);
+    } catch (e) { }
+    return html;
+  } catch (e) {
+    return null;
+  }
+}
+
+function doGet(e) {
   guardCopiedProject_();
+  // Link /exec langsung membuka aplikasi. Tambahkan ?halaman=info untuk halaman pembuka lama.
+  const minta = (e && e.parameter && e.parameter.halaman) || '';
+  if (minta !== 'info' && FRONTEND_URL.indexOf('USERNAME') === -1) {
+    const app = loadFrontendHtml_();
+    if (app) {
+      return HtmlService.createHtmlOutput(app)
+        .setTitle('AgendaGuru - Manajemen Kelas Digital')
+        .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    }
+  }
   const apiUrl = ScriptApp.getService().getUrl();
   const configured = FRONTEND_URL.indexOf('USERNAME') === -1;
   const target = FRONTEND_URL + (FRONTEND_URL.indexOf('?') >= 0 ? '&' : '?') + 'api=' + encodeURIComponent(apiUrl);

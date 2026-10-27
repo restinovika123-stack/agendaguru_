@@ -512,7 +512,7 @@ window.AGENDA_GURU_LOADED = true;
                         Swal.fire({
                             icon: 'error', title: 'Tidak dapat terhubung ke server',
                             html: 'Periksa koneksi internet. Jika masih gagal, pastikan Aplikasi Web Apps Script di-deploy dengan akses <b>Siapa saja</b>.' +
-                                (typeof agendaGuruShowConnect === 'function' ? '<br><br><a href="javascript:void(0)" onclick="Swal.close();agendaGuruShowConnect()">Ganti alamat Apps Script</a>' : ''),
+                                (typeof agendaGuruShowConnect === 'function' && !window.AGENDA_NATIVE_GAS ? '<br><br><a href="javascript:void(0)" onclick="Swal.close();agendaGuruShowConnect()">Ganti alamat Apps Script</a>' : ''),
                             footer: '<small class="text-muted">' + escapeHtml((err && err.message) || err) + '</small>'
                         });
                     }))

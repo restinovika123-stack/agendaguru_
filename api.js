@@ -36,6 +36,32 @@
         lsSet(API_KEY, u);
     }
 
+    // 0. Dibuka langsung lewat link /exec Apps Script milik guru: koneksi bawaan Google
+    //    (google.script.run) sudah tersedia, jadi tidak perlu penghubung maupun layar "Hubungkan".
+    if (typeof window.google !== 'undefined' && window.google && google.script && google.script.run) {
+        window.AGENDA_API_URL = 'apps-script';
+        window.AGENDA_NATIVE_GAS = true;
+        window.agendaGuruShowConnect = function () { };
+        try {
+            google.script.run
+                .withSuccessHandler(function (info) {
+                    window.AGENDA_SERVER_INFO = info || null;
+                    if (info && Number(info.apiVersion || 0) < MIN_API_VERSION) {
+                        showBanner('Code.gs di Spreadsheet Anda versi lama. Salin Code.gs terbaru ke Apps Script lalu buat deployment versi baru.');
+                    }
+                })
+                .withFailureHandler(function () { })
+                .getServerInfo();
+        } catch (e) { }
+        onReady(function () {
+            document.querySelectorAll('.ag-connect-link').forEach(function (el) {
+                // Tautan "Ganti alamat Apps Script" tidak relevan di mode ini
+                el.style.display = el.querySelector('[onclick*="agendaGuruShowConnect"]') || /agendaGuruShowConnect/.test(el.getAttribute('onclick') || '') ? 'none' : '';
+            });
+        });
+        return;
+    }
+
     // 1. Ambil ?api=... dari alamat (datang dari halaman pembuka Apps Script), lalu hapus dari URL
     try {
         var params = new URLSearchParams(location.search);
