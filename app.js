@@ -3699,15 +3699,71 @@ window.AGENDA_GURU_LOADED = true;
         const cid = document.getElementById('rapor-kelas')?.value;
         if (!cid) return Swal.fire('Peringatan', 'Silakan pilih kelas terlebih dahulu.', 'warning');
 
+        // Selalu buat ulang pratinjau agar yang dicetak adalah data terbaru
+        // (termasuk nilai dari Pengolah Nilai).
+        previewRaporSiswa();
         const container = document.getElementById('rapor-preview-container');
-        const sheets = container ? container.querySelectorAll('.rapor-paper-sheet') : [];
+        const sheets = container ? [...container.querySelectorAll('.rapor-paper-sheet')] : [];
         if (sheets.length === 0) {
-            previewRaporSiswa();
+            return Swal.fire('Belum Ada Rapor', 'Rapor belum bisa ditampilkan. Pastikan kelas memiliki siswa, lalu klik "Tampilkan Pratinjau Rapor".', 'info');
         }
 
+        // Cetak lewat halaman khusus (iframe tersembunyi) yang hanya berisi lembar rapor,
+        // sehingga banner, menu, dan tombol aplikasi tidak ikut tercetak.
+        // Margin kertas dibuat lewat thead/tfoot yang diulang di setiap halaman, dan
+        // @page margin 0 agar tanggal/URL bawaan browser tidak ikut tercetak.
+        const pages = sheets.map(sh => {
+            const clone = sh.cloneNode(true);
+            clone.querySelectorAll('.no-print').forEach(n => n.remove());
+            return `<table class="pp"><thead><tr><td class="pp-top"></td></tr></thead>` +
+                `<tbody><tr><td class="pp-body">${clone.innerHTML}</td></tr></tbody>` +
+                `<tfoot><tr><td class="pp-bottom"></td></tr></tfoot></table>`;
+        }).join('');
+
+        const studentId = document.getElementById('rapor-siswa')?.value;
+        const className = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid;
+        const studentName = studentId && studentId !== 'ALL' ? (db.students.find(s => String(s.StudentID) === String(studentId))?.StudentName || '') : 'Semua Siswa';
+        const docTitle = `Rapor ${studentName} - ${className}`.replace(/[\\/:*?"<>|]+/g, '-');
+
+        const html = `<!doctype html><html lang="id"><head><meta charset="utf-8"><title>${escapeHtml(docTitle)}</title><style>
+            @page { size: A4 portrait; margin: 0; }
+            html, body { margin: 0; padding: 0; background: #fff; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            body { font-family: 'Times New Roman', Times, serif; line-height: 1.35; }
+            .pp { width: 100%; border-collapse: collapse; break-after: page; page-break-after: always; }
+            .pp:last-child { break-after: auto; page-break-after: auto; }
+            .pp > thead > tr > td, .pp > tbody > tr > td, .pp > tfoot > tr > td { border: none; padding: 0; }
+            .pp-top { height: 12mm; }
+            .pp-bottom { height: 12mm; }
+            .pp > tbody > tr > td.pp-body { padding: 0 15mm; vertical-align: top; }
+            table { page-break-inside: auto; }
+            tr { page-break-inside: avoid; break-inside: avoid; }
+            img { max-width: 100%; }
+        </style></head><body>${pages}</body></html>`;
+
+        const old = document.getElementById('rapor-print-frame');
+        if (old) old.remove();
+        const frame = document.createElement('iframe');
+        frame.id = 'rapor-print-frame';
+        frame.setAttribute('aria-hidden', 'true');
+        frame.style.cssText = 'position:fixed; right:0; bottom:0; width:0; height:0; border:0; visibility:hidden;';
+        document.body.appendChild(frame);
+        const fdoc = frame.contentWindow.document;
+        fdoc.open(); fdoc.write(html); fdoc.close();
+
+        // Judul dokumen menjadi nama file default jika guru memilih "Simpan sebagai PDF"
+        const prevTitle = document.title;
+        document.title = docTitle;
         setTimeout(() => {
-            window.print();
-        }, 250);
+            try {
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+            } catch (e) {
+                // Cadangan: cetak halaman utama memakai aturan @media print
+                window.print();
+            } finally {
+                document.title = prevTitle;
+            }
+        }, 300);
     }
 
     async function prosesCetakRaporSiswaPDF() {
