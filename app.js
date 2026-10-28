@@ -528,6 +528,7 @@ window.AGENDA_GURU_LOADED = true;
                 .getAllData(token);
         } else {
             // Simulation Mode (Canvas / Browser Local) — tidak ada server GAS untuk dihubungi
+            if (window.AGENDA_DEMO) { await muatDataDemo(); return; }
             try {
                 const localDb = await getLocalFallbackDb();
                 if (localDb && localDb.config && localDb.config.registeredEmail) {
@@ -554,6 +555,57 @@ window.AGENDA_GURU_LOADED = true;
                 processLoadedData(null);
             }
         }
+    }
+
+    // --- Mode Demo (halaman coba gratis untuk calon pembeli) ---
+    // Tidak ada server: data contoh dibuat di browser, perubahan hanya tersimpan di browser pengunjung.
+    const DEMO_VERSI = 'demo-1';
+    function buatDbDemo() {
+        const d = buatDataContoh_();
+        return {
+            classes: d.classes, students: d.students, attendance: d.attendance, grades: d.grades, koku: d.koku, ekskul: d.ekskul,
+            journal: d.journal, schedule: d.schedule, poin: d.poin, raporNotes: d.raporNotes, nilaiAkhir: d.nilaiAkhir, subjects: d.subjects,
+            tpBank: JSON.parse(JSON.stringify(DEFAULT_TP_BANK)),
+            config: Object.assign({}, d.config, {
+                registeredEmail: 'demo@agendaguru.id', userName: 'Guru Demo, S.Pd.', demoVersi: DEMO_VERSI, demoTapel: d.tapel
+            })
+        };
+    }
+    async function muatDataDemo() {
+        let data = null;
+        try { data = await getLocalFallbackDb(); } catch (e) { }
+        // Buat ulang data contoh jika belum ada, versi berubah, atau tahun pelajaran sudah berganti
+        if (!data || !data.config || data.config.demoVersi !== DEMO_VERSI || data.config.demoTapel !== getDefaultTapel()) {
+            data = buatDbDemo();
+            try { setActiveTapel(getDefaultTapel()); } catch (e) { }
+            const s = JSON.stringify(data);
+            try { if (typeof localforage !== 'undefined') await localforage.setItem(MASTER_DB_ID, s); } catch (e) { }
+            try { localStorage.setItem(MASTER_DB_ID, s); } catch (e) { }
+        }
+        try { localStorage.setItem('agendaGuru_isLogged', 'true'); } catch (e) { }
+        processLoadedData(data);
+    }
+    async function aturUlangDemo(tanya) {
+        if (tanya !== false) {
+            const r = await Swal.fire({ icon: 'question', title: 'Atur ulang data demo?', text: 'Semua perubahan yang Anda buat di demo ini akan dihapus dan data contoh dikembalikan.', showCancelButton: true, confirmButtonText: 'Ya, atur ulang', cancelButtonText: 'Batal' });
+            if (!r.isConfirmed) return;
+        }
+        try { if (typeof localforage !== 'undefined') await localforage.removeItem(MASTER_DB_ID); } catch (e) { }
+        try { localStorage.removeItem(MASTER_DB_ID); } catch (e) { }
+        location.reload();
+    }
+    function tampilkanBannerDemo() {
+        if (!window.AGENDA_DEMO || document.getElementById('demo-banner')) return;
+        const wa = 'https://wa.me/6285788408882?text=' + encodeURIComponent('Halo, saya sudah mencoba demo AgendaGuru dan ingin membeli.');
+        const b = document.createElement('div');
+        b.id = 'demo-banner';
+        b.setAttribute('role', 'region'); b.setAttribute('aria-label', 'Informasi mode demo');
+        b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:1040;background:#172B4D;color:#fff;padding:8px 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;font:600 13px "Plus Jakarta Sans",system-ui,sans-serif;box-shadow:0 -4px 14px rgba(0,0,0,.18)';
+        b.innerHTML = '<span><i class="bi bi-eye"></i> <b style="color:#5EEAD4">MODE DEMO</b> &middot; Data contoh &middot; perubahan hanya tersimpan di browser ini</span>' +
+            '<button type="button" class="btn btn-sm btn-outline-light py-0" onclick="aturUlangDemo()"><i class="bi bi-arrow-counterclockwise"></i> Atur Ulang</button>' +
+            '<a class="btn btn-sm py-0" style="background:#25D366;color:#fff" target="_blank" rel="noopener" href="' + wa + '"><i class="bi bi-whatsapp"></i> Beli Sekarang</a>';
+        document.body.appendChild(b);
+        document.body.style.paddingBottom = (b.offsetHeight + 8) + 'px';
     }
 
     if (document.readyState === 'loading') {
@@ -718,7 +770,8 @@ window.AGENDA_GURU_LOADED = true;
         populateMapelSelects();
         updateProfileUI();
         switchView('beranda');
-        setTimeout(() => tawarkanInstalAplikasi(MINTA_INSTAL), MINTA_INSTAL ? 800 : 1500);
+        if (window.AGENDA_DEMO) tampilkanBannerDemo();
+        else setTimeout(() => tawarkanInstalAplikasi(MINTA_INSTAL), MINTA_INSTAL ? 800 : 1500);
     }
 
     // --- Pasang aplikasi (PWA) di HP, tablet, laptop ---
@@ -854,6 +907,7 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     function logout() {
+        if (window.AGENDA_DEMO) return aturUlangDemo(); // akun demo: "keluar" = kembali ke data contoh
         if (IS_GAS) {
             if (pendingSyncCount > 0 || conflictPending || isDirty()) {
                 return Swal.fire('Tunggu Sebentar', 'Masih ada perubahan yang belum tersimpan ke Spreadsheet. Pastikan internet tersambung, tunggu indikator "Menyimpan..." hilang, lalu coba keluar lagi.', 'warning');
