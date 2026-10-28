@@ -12,6 +12,7 @@
     'use strict';
     var API_KEY = 'agendaGuru_apiUrl';
     var MIN_API_VERSION = 3; // versi Code.gs minimum (v2: Pengolah Nilai, v3: lisensi)
+    window.AGENDA_MIN_API_VERSION = MIN_API_VERSION; // dipakai pemberitahuan pembaruan di app.js
     // Data milik koneksi lama yang harus dibersihkan saat pindah ke Apps Script lain
     var PER_ACCOUNT_KEYS = ['agendaGuru_token', 'agendaGuru_unsynced', 'agendaGuru_isLogged', 'AGENDA_GURU_MASTER_DB'];
 

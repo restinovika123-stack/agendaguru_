@@ -771,7 +771,10 @@ window.AGENDA_GURU_LOADED = true;
         updateProfileUI();
         switchView('beranda');
         if (window.AGENDA_DEMO) tampilkanBannerDemo();
-        else setTimeout(() => tawarkanInstalAplikasi(MINTA_INSTAL), MINTA_INSTAL ? 800 : 1500);
+        else {
+            setTimeout(() => cekPembaruanCodeGs(0), 1000); // pembaruan penting didahulukan dari ajakan instal
+            setTimeout(() => tawarkanInstalAplikasi(MINTA_INSTAL), MINTA_INSTAL ? 800 : 2500);
+        }
     }
 
     // --- Pasang aplikasi (PWA) di HP, tablet, laptop ---
@@ -882,6 +885,44 @@ window.AGENDA_GURU_LOADED = true;
         }).then(r => {
             if (r.isConfirmed) setInstallState('terpasang');
             else if (r.dismiss === Swal.DismissReason.cancel || r.dismiss === Swal.DismissReason.backdrop || r.dismiss === Swal.DismissReason.close || r.dismiss === Swal.DismissReason.esc) setInstallState('nanti');
+        });
+    }
+
+    // --- Pemberitahuan pembaruan Code.gs ---
+    // Saat merilis Code.gs baru: naikkan API_VERSION di Code.gs DAN angka di bawah ini, isi catatannya,
+    // lalu push. Pembeli dengan Code.gs lebih lama mendapat pemberitahuan (aplikasi tetap bisa dipakai).
+    const VERSI_CODEGS_TERBARU = 3;
+    const CATATAN_PEMBARUAN = 'Ada pembaruan AgendaGuru yang memerlukan Code.gs terbaru.';
+    const LINK_PANDUAN_UPDATE = 'https://agendaguru-id.vercel.app/#update';
+    const UPDATE_NANTI_KEY = 'agendaGuru_updateNanti';
+
+    function cekPembaruanCodeGs(percobaan) {
+        if (!IS_GAS || window.AGENDA_DEMO || typeof Swal === 'undefined') return;
+        const info = window.AGENDA_SERVER_INFO;
+        if (!info) { if ((percobaan || 0) < 15) setTimeout(() => cekPembaruanCodeGs((percobaan || 0) + 1), 1000); return; } // tunggu info server
+        const versi = Number(info.apiVersion || 0);
+        if (versi >= VERSI_CODEGS_TERBARU) return;
+        if (versi < Number(window.AGENDA_MIN_API_VERSION || 0)) return; // versi terlalu lama: sudah ada peringatan wajib dari api.js
+        try {
+            const n = JSON.parse(localStorage.getItem(UPDATE_NANTI_KEY) || '{}');
+            if (n.versi === VERSI_CODEGS_TERBARU && Date.now() - (n.at || 0) < 3 * 864e5) return; // ditunda 3 hari
+        } catch (e) { }
+        if (Swal.isVisible()) return setTimeout(() => cekPembaruanCodeGs(percobaan), 4000);
+        Swal.fire({
+            icon: 'info',
+            title: 'Pembaruan AgendaGuru Tersedia',
+            html: `<p class="mb-2">${escapeHtml(CATATAN_PEMBARUAN)}</p>
+                <div class="text-start small" style="background:#E6F6F6;border-radius:10px;padding:10px 12px">
+                    <b>✅ Data Anda aman.</b> Memperbarui Code.gs tidak menghapus data siswa, nilai, absensi, maupun akun Anda. Waktunya sekitar 2 menit.
+                </div>
+                <div class="small text-muted mt-2">Versi Code.gs Anda: ${versi} &middot; Terbaru: ${VERSI_CODEGS_TERBARU}</div>`,
+            showCancelButton: true,
+            confirmButtonText: '<i class="bi bi-box-arrow-up-right"></i> Lihat Cara Memperbarui',
+            cancelButtonText: 'Nanti saja',
+            reverseButtons: true
+        }).then(r => {
+            if (r.isConfirmed) window.open(LINK_PANDUAN_UPDATE, '_blank', 'noopener');
+            try { localStorage.setItem(UPDATE_NANTI_KEY, JSON.stringify({ versi: VERSI_CODEGS_TERBARU, at: Date.now() })); } catch (e) { }
         });
     }
 
