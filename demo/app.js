@@ -1801,7 +1801,8 @@ window.AGENDA_GURU_LOADED = true;
             tbody += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${escapeHtml(s.StudentName)}
                 <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="sendWAAbsen('${s.StudentID}')" title="Kirim WA Orang Tua"><i class="bi bi-whatsapp"></i></button>
                 </td>`;
-            let sAtt = savedAttendance[s.StudentID] || Array(colCount).fill('-');
+            // Bulan yang belum pernah diisi: kolom pertama langsung "H" untuk semua siswa
+            let sAtt = savedAttendance[s.StudentID] || Array(colCount).fill(record ? '-' : 'H');
             for (let i = 0; i < colCount; i++) {
                 let val = sAtt[i] || '-', color = val !== '-' ? `status-${val}` : '';
                 tbody += `<td><select class="status-select select-absen-val ${color}" data-sid="${s.StudentID}" data-idx="${i}" onchange="updateSelectColor(this)">
@@ -1821,7 +1822,16 @@ window.AGENDA_GURU_LOADED = true;
         let record = db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && matchTapel(a, getActiveTapel()));
         if (record) {
             let dates = JSON.parse(record.DatesData); dates.push(""); record.DatesData = JSON.stringify(dates);
-            let att = JSON.parse(record.AttendanceData); for (let sid in att) { att[sid].push("-"); } record.AttendanceData = JSON.stringify(att); syncDB();
+            let att = JSON.parse(record.AttendanceData);
+            // Kolom baru: semua siswa di kelas langsung "H" (Hadir); guru cukup mengubah yang tidak hadir
+            db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => {
+                const row = Array.isArray(att[s.StudentID]) ? att[s.StudentID] : [];
+                while (row.length < dates.length - 1) row.push('-');
+                row.length = dates.length - 1;
+                row.push('H');
+                att[s.StudentID] = row;
+            });
+            record.AttendanceData = JSON.stringify(att); syncDB();
         }
         loadAbsensiData();
     }
