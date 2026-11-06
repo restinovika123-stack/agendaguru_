@@ -781,7 +781,12 @@ window.AGENDA_GURU_LOADED = true;
     // Aplikasi yang bisa dipasang ada di alamat frontend (GitHub Pages). Dari link /exec (di dalam
     // bingkai Google) tombol Instal browser tidak tersedia, jadi pengguna diarahkan ke halaman pemasangan
     // yang otomatis terhubung ke Apps Script miliknya.
-    const INSTALL_KEY = 'agendaGuru_install';
+    function perangkatApple() {
+        const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+        return /iPad|iPhone|iPod|Macintosh/.test(ua);
+    }
+    // Perangkat Apple memakai kunci baru: status lama bisa salah tersimpan "terpasang" (lihat dibukaSebagaiAplikasi)
+    const INSTALL_KEY = perangkatApple() ? 'agendaGuru_install_apple' : 'agendaGuru_install';
     let installPromptEvent = null;
     window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPromptEvent = e; });
     window.addEventListener('appinstalled', () => { setInstallState('terpasang'); installPromptEvent = null; });
@@ -790,17 +795,23 @@ window.AGENDA_GURU_LOADED = true;
     function setInstallState(status) { try { localStorage.setItem(INSTALL_KEY, JSON.stringify({ status, at: Date.now() })); } catch (e) { } }
 
     function dibukaSebagaiAplikasi() {
+        if (window.navigator.standalone === true) return true; // iPhone/iPad dari ikon Layar Utama
+        // "fullscreen" tidak dipakai: browser layar penuh (mis. Mac/F11) bukan berarti aplikasi terpasang.
+        // Di dalam bingkai Google (link /exec), Safari tidak bisa diandalkan, jadi diabaikan di perangkat Apple.
+        const dalamBingkai = (() => { try { return window.top !== window.self; } catch (e) { return true; } })();
+        if (perangkatApple() && dalamBingkai) return false;
         try {
-            if (['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'].some(m => window.matchMedia('(display-mode: ' + m + ')').matches)) return true;
-        } catch (e) { }
-        return window.navigator.standalone === true;
+            return ['standalone', 'minimal-ui', 'window-controls-overlay'].some(m => window.matchMedia('(display-mode: ' + m + ')').matches);
+        } catch (e) { return false; }
     }
 
     function jenisPerangkat() {
         const ua = navigator.userAgent || '';
         if (/iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
         if (/Android/i.test(ua)) return 'android';
-        return /Edg\//.test(ua) ? 'edge' : 'desktop';
+        if (/Edg\//.test(ua)) return 'edge';
+        if (/Macintosh/.test(ua) && /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Firefox|FxiOS|OPR\//.test(ua)) return 'mac-safari';
+        return 'desktop';
     }
 
     function alamatPemasangan() {
@@ -815,7 +826,8 @@ window.AGENDA_GURU_LOADED = true;
 
     function langkahInstal(jenis) {
         const chip = t => `<span style="display:inline-block;background:#EEF1F5;border:1px solid #DFE3EA;border-radius:6px;padding:0 7px;font-weight:700">${t}</span>`;
-        if (jenis === 'ios') return { judul: 'iPhone / iPad (Safari)', langkah: [`Ketuk tombol Bagikan ${chip('<i class="bi bi-box-arrow-up"></i>')}.`, `Pilih ${chip('Tambahkan ke Layar Utama')}.`, `Ketuk ${chip('Tambah')}.`] };
+        if (jenis === 'ios') return { judul: 'iPhone / iPad (Safari)', langkah: [`Ketuk tombol Bagikan ${chip('<i class="bi bi-box-arrow-up"></i>')} (di bawah layar iPhone, atau di kanan atas iPad).`, `Gulir lalu pilih ${chip('Tambahkan ke Layar Utama')}.`, `Ketuk ${chip('Tambah')}. Ikon AgendaGuru muncul di layar utama.`, `<span class="text-muted">Memakai Chrome di iPhone? Ketuk ikon Bagikan di bilah alamat, lalu pilih yang sama.</span>`] };
+        if (jenis === 'mac-safari') return { judul: 'MacBook / iMac (Safari)', langkah: [`Di bilah menu atas, klik ${chip('Arsip')} (File).`, `Pilih ${chip('Tambahkan ke Dock')} (Add to Dock), lalu klik ${chip('Tambah')}.`, `AgendaGuru muncul di Dock dan Launchpad.`, `<span class="text-muted">Menu ini ada di macOS Sonoma (Safari 17) ke atas. Versi lebih lama: buka dengan Google Chrome lalu ikuti langkah Chrome.</span>`] };
         if (jenis === 'android') return { judul: 'HP / Tablet Android (Chrome)', langkah: [`Ketuk menu ${chip('⋮')} di kanan atas.`, `Pilih ${chip('Instal aplikasi')} atau ${chip('Tambahkan ke layar utama')}.`, `Ketuk ${chip('Instal')}.`] };
         if (jenis === 'edge') return { judul: 'Laptop / Komputer (Edge)', langkah: [`Klik ikon instal ${chip('<i class="bi bi-plus-square"></i>')} di ujung kanan bilah alamat, atau menu ${chip('⋯')} → ${chip('Aplikasi')} → ${chip('Instal AgendaGuru')}.`, `Klik ${chip('Instal')}.`] };
         return { judul: 'Laptop / Komputer (Chrome)', langkah: [`Klik ikon instal ${chip('<i class="bi bi-download"></i>')} di ujung kanan bilah alamat, atau menu ${chip('⋮')} → ${chip('Transmisikan, simpan, dan bagikan')} → ${chip('Instal AgendaGuru')}.`, `Klik ${chip('Instal')}.`] };
@@ -825,7 +837,6 @@ window.AGENDA_GURU_LOADED = true;
     function tawarkanInstalAplikasi(paksa) {
         if (typeof Swal === 'undefined') return;
         if (dibukaSebagaiAplikasi()) {
-            setInstallState('terpasang');
             if (paksa) Swal.fire('Sudah Terpasang', 'AgendaGuru sudah berjalan sebagai aplikasi di perangkat ini.', 'success');
             return;
         }
@@ -841,7 +852,7 @@ window.AGENDA_GURU_LOADED = true;
         const info = langkahInstal(jenis);
         const daftar = l => '<ol style="text-align:left;margin:6px 0 0;padding-left:20px;line-height:1.9">' + l.map(x => `<li>${x}</li>`).join('') + '</ol>';
         const kotak = (x, ikon) => `<div style="background:#E6F6F6;border-radius:10px;padding:12px 14px;text-align:left"><b><i class="bi bi-${ikon}"></i> ${x.judul}</b>${daftar(x.langkah)}</div>`;
-        const lain = ['android', 'ios', jenis === 'edge' ? 'edge' : 'desktop'].filter(j => j !== jenis);
+        const lain = ['android', 'ios', 'mac-safari', jenis === 'edge' ? 'edge' : 'desktop'].filter(j => j !== jenis);
         const caraLain = `<details style="text-align:left;margin-top:10px"><summary style="cursor:pointer;font-weight:600">Cara untuk perangkat lain</summary>${lain.map(j => { const x = langkahInstal(j); return `<div style="margin-top:8px"><b>${x.judul}</b>${daftar(x.langkah)}</div>`; }).join('')}</details>`;
 
         let isi;
