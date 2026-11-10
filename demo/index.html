@@ -3362,8 +3362,16 @@
                             </select>
                         </div>
 
+                        <div class="alert alert-info py-2 px-3 small d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <span><i class="bi bi-magic me-1"></i> Tidak perlu menulis satu per satu: buat catatan untuk semua siswa dari poin, nilai, kehadiran, dan kokurikuler.</span>
+                            <button type="button" class="btn btn-sm btn-primary fw-semibold" onclick="buatCatatanSemuaSiswa()"><i class="bi bi-people me-1"></i> Buat untuk Semua Siswa</button>
+                        </div>
+
                         <div class="mb-3">
-                            <label class="form-label small fw-bold mb-1">Catatan Wali Kelas:</label>
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label small fw-bold mb-0" for="modal-catatan-text">Catatan Wali Kelas:</label>
+                                <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="isiCatatanOtomatisSiswa()"><i class="bi bi-stars me-1"></i> Isi Otomatis</button>
+                            </div>
                             <textarea class="form-control" id="modal-catatan-text" rows="3" placeholder="Tuliskan catatan apresiasi, motivasi, atau arahan pengembangan diri siswa..."></textarea>
                             <small class="text-muted">Catatan ini tersimpan secara permanen untuk siswa dan periode yang dipilih.</small>
                         </div>
@@ -3394,8 +3402,8 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="demo-data.js?v=20261110154848"></script>
-<script src="app.js?v=20261110154848"></script>
+    <script src="demo-data.js?v=20261110161422"></script>
+<script src="app.js?v=20261110161422"></script>
     
 </body>
 

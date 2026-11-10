@@ -4598,6 +4598,159 @@ window.AGENDA_GURU_LOADED = true;
         return { H, S, I, A, hasRecords: recordsCount > 0 };
     }
 
+    // =====================================================================
+    // CATATAN WALI KELAS OTOMATIS
+    // Disusun dari data yang sudah ada: poin siswa (prestasi & kedisiplinan), nilai rapor,
+    // kehadiran, kokurikuler, dan ekstrakurikuler. Jika poin kosong, sumber lain tetap dipakai.
+    // =====================================================================
+    const CW_SUMBER_DEFAULT = { poin: true, nilai: true, hadir: true, koku: true };
+    function cwHuruf(s) { s = String(s || '').trim().replace(/[.!]+$/, ''); return s ? s.charAt(0).toLowerCase() + s.slice(1) : ''; }
+    function cwPilih(arr, kunci) { let h = 0; String(kunci).split('').forEach(ch => { h = (h * 31 + ch.charCodeAt(0)) >>> 0; }); return arr[h % arr.length]; }
+    function cwBulanSemester(sem, tapel) {
+        const y = parseInt(String(tapel || '').slice(0, 4), 10) || new Date().getFullYear();
+        return sem === 'ganjil' ? ['07', '08', '09', '10', '11', '12'].map(m => y + '-' + m) : ['01', '02', '03', '04', '05', '06'].map(m => (y + 1) + '-' + m);
+    }
+    // Bahan catatan satu siswa (dipakai juga untuk menampilkan sumber di pratinjau)
+    function cwBahan(cid, sid, sem, tapel) {
+        const bulan = cwBulanSemester(sem, tapel);
+        const poin = (db.poin || []).filter(p => String(p.StudentID) === String(sid) && bulan.includes(String(p.Tanggal || '').slice(0, 7)));
+        const reward = poin.filter(p => (Number(p.PoinReward) || 0) > 0).sort((a, b) => (Number(b.PoinReward) || 0) - (Number(a.PoinReward) || 0));
+        const langgar = poin.filter(p => (Number(p.PoinPelanggaran) || 0) > 0);
+        const hitung = {}; langgar.forEach(p => { const k = cwHuruf(p.Keterangan); if (k) hitung[k] = (hitung[k] || 0) + 1; });
+        const langgarUtama = Object.keys(hitung).sort((a, b) => hitung[b] - hitung[a]);
+        const net = poin.reduce((a, p) => a + (Number(p.PoinReward) || 0) - (Number(p.PoinPelanggaran) || 0), 0);
+        const nilai = getStudentAllGrades(cid, sid, sem, tapel).filter(g => g.hasScore && g.finalScore !== null);
+        const rata = nilai.length ? nilai.reduce((a, g) => a + g.finalScore, 0) / nilai.length : null;
+        const urut = nilai.slice().sort((a, b) => b.finalScore - a.finalScore);
+        const att = getStudentAttendanceSummary(cid, sid, sem, tapel);
+        const totAtt = att.H + att.S + att.I + att.A;
+        const koku = getStudentKokuSummary(cid, sid, sem);
+        const ekskul = (db.ekskul || []).filter(e => String(e.StudentID) === String(sid) && String(e.Semester || '').toLowerCase() === sem && (!e.TahunPelajaran || String(e.TahunPelajaran) === String(tapel)));
+        return {
+            reward: reward.map(p => cwHuruf(p.Keterangan)).filter(Boolean), langgarUtama, net, adaPoin: poin.length > 0,
+            rata, terbaik: urut.slice(0, 2).filter(g => rata === null || g.finalScore >= rata).map(g => g.subject),
+            terendah: urut.length > 2 && urut[urut.length - 1].finalScore < 75 ? urut[urut.length - 1].subject : '',
+            hadir: totAtt ? att.H / totAtt * 100 : null, alpa: att.A,
+            kokuKategori: koku.hasData && koku.items[0] ? koku.items[0].kategori : '',
+            ekskul: ekskul.filter(e => /baik/i.test(e.Predikat || '')).map(e => e.NamaEkskul).filter(Boolean)
+        };
+    }
+    function buatCatatanWali(cid, student, sem, tapel, sumber) {
+        sumber = Object.assign({}, CW_SUMBER_DEFAULT, sumber || {});
+        const b = cwBahan(cid, student.StudentID, sem, tapel), k = student.StudentID;
+        const nama = 'Ananda ' + String(student.StudentName || '').trim().split(/\s+/)[0];
+        const kal = [];
+        // 1. Capaian akademik
+        if (sumber.nilai && b.rata !== null) {
+            const tingkat = b.rata >= 90 ? 'sangat baik' : b.rata >= 80 ? 'baik' : b.rata >= 70 ? 'cukup baik' : 'perlu terus ditingkatkan';
+            const kuat = b.terbaik.length ? `, terutama pada ${b.terbaik.join(' dan ')}` : '';
+            kal.push(b.rata >= 70
+                ? cwPilih([`${nama} menunjukkan capaian belajar yang ${tingkat} pada semester ini${kuat}.`, `Pada semester ini ${nama} meraih hasil belajar yang ${tingkat}${kuat}.`], k + 'a')
+                : `${nama} sudah berusaha mengikuti pembelajaran dengan baik, namun capaian belajarnya masih perlu ditingkatkan.`);
+        } else {
+            kal.push(cwPilih([`${nama} telah mengikuti kegiatan pembelajaran pada semester ini dengan baik.`, `${nama} mengikuti proses belajar di kelas dengan baik pada semester ini.`], k + 'a'));
+        }
+        // 2. Sikap: dari poin; jika tidak ada poin, dari kokurikuler / ekstrakurikuler
+        let adaSikap = false;
+        if (sumber.poin && b.reward.length) {
+            kal.push(cwPilih([`Perilaku positif Ananda seperti ${b.reward[0]} patut diapresiasi.`, `Apresiasi untuk sikap baiknya, antara lain ${b.reward[0]}.`], k + 'r'));
+            adaSikap = true;
+        }
+        if (sumber.poin && b.langgarUtama.length) {
+            kal.push(cwPilih([`Ke depan, Ananda perlu lebih memperhatikan kedisiplinan, terutama terkait ${b.langgarUtama[0]}.`, `Ananda diharapkan lebih disiplin, khususnya terkait ${b.langgarUtama[0]}.`], k + 'p'));
+            adaSikap = true;
+        }
+        if (!adaSikap && sumber.koku) {
+            if (b.kokuKategori) { kal.push(`Dalam kegiatan kokurikuler, Ananda menunjukkan sikap yang ${b.kokuKategori.toLowerCase()}${/kurang|cukup/i.test(b.kokuKategori) ? ' dan perlu lebih aktif bekerja sama' : ''}.`); adaSikap = true; }
+            else if (b.ekskul.length) { kal.push(`Ananda aktif dan berprestasi dalam kegiatan ekstrakurikuler ${b.ekskul.slice(0, 2).join(' dan ')}.`); adaSikap = true; }
+        }
+        if (!adaSikap && sumber.poin && b.adaPoin && b.net >= 0) kal.push('Sikap dan perilaku Ananda di sekolah baik.');
+        // 3. Kehadiran
+        if (sumber.hadir && b.hadir !== null) {
+            if (b.alpa >= 3) kal.push(`Kehadiran perlu ditingkatkan karena masih ada ${b.alpa} hari tanpa keterangan.`);
+            else if (b.hadir >= 95 && b.alpa === 0) kal.push(cwPilih(['Kehadirannya sangat baik dan tepat waktu.', 'Kedisiplinan hadir di sekolah sangat baik.'], k + 'h'));
+            else if (b.hadir < 85) kal.push('Kehadiran di sekolah perlu lebih dijaga.');
+        }
+        // 4. Saran & penutup
+        if (sumber.nilai && b.terendah) kal.push(`Tingkatkan lagi belajar pada ${b.terendah}.`);
+        kal.push(cwPilih(['Pertahankan semangat belajarmu!', 'Teruslah bersemangat meraih prestasi!', 'Semangat belajar dan raih cita-citamu!', 'Terus kembangkan potensimu!'], k + 'z'));
+        return kal.join(' ');
+    }
+
+    // Isi otomatis untuk siswa yang sedang dipilih di modal (tetap bisa diedit sebelum disimpan)
+    function isiCatatanOtomatisSiswa() {
+        const sid = document.getElementById('modal-catatan-select-siswa')?.value;
+        const cid = document.getElementById('rapor-kelas')?.value;
+        const sem = document.getElementById('rapor-semester')?.value || 'genap';
+        const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
+        const s = db.students.find(x => String(x.StudentID) === String(sid)); if (!s) return;
+        const ta = document.getElementById('modal-catatan-text');
+        ta.value = buatCatatanWali(cid, s, sem, tapel);
+        ta.focus();
+    }
+
+    // Buat catatan untuk semua siswa sekelas: pilih sumber -> pratinjau & edit -> simpan
+    async function buatCatatanSemuaSiswa() {
+        const cid = document.getElementById('rapor-kelas')?.value;
+        const sem = document.getElementById('rapor-semester')?.value || 'genap';
+        const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
+        const stds = db.students.filter(s => String(s.ClassID) === String(cid));
+        if (!stds.length) return Swal.fire('Informasi', 'Belum ada siswa di kelas ini.', 'info');
+        try { bootstrap.Modal.getInstance(document.getElementById('modalCatatanWali'))?.hide(); } catch (e) { }
+        const adaPoin = (db.poin || []).some(p => stds.some(s => s.StudentID === p.StudentID) && cwBulanSemester(sem, tapel).includes(String(p.Tanggal || '').slice(0, 7)));
+        const cek = (id, label, ket, on) => `<label class="d-flex gap-2 align-items-start text-start mb-2" style="cursor:pointer"><input type="checkbox" class="form-check-input mt-1" id="${id}" ${on ? 'checked' : ''}><span><b>${label}</b><br><small class="text-muted">${ket}</small></span></label>`;
+        const pil = await Swal.fire({
+            title: 'Buat Catatan Wali Otomatis',
+            width: 560,
+            html: `<p class="small text-muted mb-3">Catatan disusun dari data yang sudah Anda isi di aplikasi. Anda dapat mengedit setiap catatan sebelum disimpan.</p>
+                ${cek('cw-poin', 'Poin siswa', adaPoin ? 'Prestasi & kedisiplinan dari menu Poin Siswa.' : 'Belum ada poin semester ini, sumber lain akan dipakai otomatis.', true)}
+                ${cek('cw-nilai', 'Nilai rapor', 'Capaian umum, mapel terkuat, dan mapel yang perlu ditingkatkan.', true)}
+                ${cek('cw-hadir', 'Kehadiran', 'Kedisiplinan hadir dan jumlah alpa.', true)}
+                ${cek('cw-koku', 'Kokurikuler & ekstrakurikuler', 'Dipakai bila siswa tidak memiliki catatan poin.', true)}
+                <hr class="my-2"><div class="text-start small fw-bold mb-1">Siswa yang sudah punya catatan:</div>
+                <label class="d-block text-start small"><input type="radio" name="cw-mode" value="kosong" checked> Lewati (hanya isi yang masih kosong)</label>
+                <label class="d-block text-start small"><input type="radio" name="cw-mode" value="timpa"> Ganti dengan catatan baru</label>`,
+            showCancelButton: true, confirmButtonText: 'Buat Pratinjau', cancelButtonText: 'Batal',
+            preConfirm: () => ({
+                sumber: { poin: document.getElementById('cw-poin').checked, nilai: document.getElementById('cw-nilai').checked, hadir: document.getElementById('cw-hadir').checked, koku: document.getElementById('cw-koku').checked },
+                timpa: document.querySelector('input[name="cw-mode"]:checked')?.value === 'timpa'
+            })
+        });
+        if (!pil.isConfirmed) return;
+        const kelasNama = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || '';
+        const daftar = stds.map(s => {
+            const lama = getStudentRaporNotes(s.StudentID, sem, tapel, kelasNama).catatanWali || '';
+            const tersimpan = (db.raporNotes || []).some(n => String(n.StudentID) === String(s.StudentID) && String(n.Semester) === String(sem) && String(n.TahunPelajaran) === String(tapel) && String(n.CatatanWali || '').trim());
+            const pakaiLama = tersimpan && !pil.value.timpa;
+            return { s, teks: pakaiLama ? lama : buatCatatanWali(cid, s, sem, tapel, pil.value.sumber), lewati: pakaiLama };
+        });
+        const baris = daftar.map((d, i) => `<tr><td class="text-center align-top pt-2">${i + 1}</td>
+            <td class="align-top pt-2 text-start"><b>${escapeHtml(d.s.StudentName)}</b>${d.lewati ? '<br><span class="badge bg-secondary-subtle text-secondary">catatan lama</span>' : ''}</td>
+            <td><textarea class="form-control form-control-sm cw-teks" data-i="${i}" rows="3" ${d.lewati ? 'disabled' : ''}>${escapeHtml(d.teks)}</textarea></td></tr>`).join('');
+        const jmlBaru = daftar.filter(d => !d.lewati).length;
+        const simpan = await Swal.fire({
+            title: `Pratinjau Catatan (${jmlBaru} siswa)`,
+            width: 900,
+            html: `<div class="text-start small text-muted mb-2">Periksa dan ubah bila perlu. Catatan bertanda "catatan lama" tidak diubah.</div>
+                <div style="max-height:60vh;overflow:auto"><table class="table table-sm align-middle mb-0"><thead class="table-light"><tr><th style="width:36px">No</th><th style="width:190px" class="text-start">Nama</th><th class="text-start">Catatan Wali Kelas</th></tr></thead><tbody>${baris}</tbody></table></div>`,
+            showCancelButton: true, confirmButtonText: `<i class="bi bi-check-circle"></i> Simpan ${jmlBaru} Catatan`, cancelButtonText: 'Batal',
+            preConfirm: () => Array.from(document.querySelectorAll('.cw-teks')).map(t => ({ i: Number(t.dataset.i), teks: t.value.trim() }))
+        });
+        if (!simpan.isConfirmed) return;
+        if (!db.raporNotes) db.raporNotes = [];
+        let n = 0;
+        simpan.value.forEach(({ i, teks }) => {
+            const d = daftar[i]; if (d.lewati) return;
+            const idx = db.raporNotes.findIndex(x => String(x.StudentID) === String(d.s.StudentID) && String(x.Semester) === String(sem) && String(x.TahunPelajaran) === String(tapel));
+            if (idx > -1) { db.raporNotes[idx].CatatanWali = teks; db.raporNotes[idx].ClassID = cid; }
+            else db.raporNotes.push({ RecordID: 'RN' + Date.now() + '_' + i, StudentID: d.s.StudentID, ClassID: cid, Semester: sem, TahunPelajaran: tapel, CatatanWali: teks, Keputusan: getStudentRaporNotes(d.s.StudentID, sem, tapel, kelasNama).keputusan || '' });
+            n++;
+        });
+        syncDB();
+        if (typeof previewRaporSiswa === 'function') previewRaporSiswa();
+        Swal.fire({ icon: 'success', title: 'Tersimpan', text: `${n} catatan wali kelas disimpan dan langsung tampil di rapor.`, timer: 2000, showConfirmButton: false });
+    }
+
     function getStudentKokuSummary(cid, studentId, semester) {
         if (!db.koku || db.koku.length === 0) {
             return { hasData: false, items: [], text: 'Belum ada data penilaian kokurikuler untuk periode ini.' };
