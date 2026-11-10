@@ -735,6 +735,36 @@ window.AGENDA_GURU_LOADED = true;
         }
     }
 
+    // --- Tombol mata: tampilkan / sembunyikan password ---
+    function pasangTombolMata(akar) {
+        (akar || document).querySelectorAll('input[type="password"]:not([data-mata])').forEach(inp => {
+            inp.setAttribute('data-mata', '1');
+            // Kolom di dialog: pertahankan lebar asli agar sejajar dengan kolom lain
+            if (inp.classList.contains('swal2-input') && inp.offsetWidth) inp.style.width = inp.offsetWidth + 'px';
+            const bungkus = document.createElement('div');
+            bungkus.className = 'mata-bungkus' + (inp.classList.contains('swal2-input') ? ' mata-swal' : '');
+            inp.parentNode.insertBefore(bungkus, inp);
+            bungkus.appendChild(inp);
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'mata-tombol';
+            b.setAttribute('aria-label', 'Tampilkan password');
+            b.title = 'Tampilkan password';
+            b.innerHTML = '<i class="bi bi-eye"></i>';
+            b.addEventListener('click', () => {
+                const lihat = inp.type === 'password';
+                inp.type = lihat ? 'text' : 'password';
+                b.innerHTML = '<i class="bi bi-eye' + (lihat ? '-slash' : '') + '"></i>';
+                b.title = lihat ? 'Sembunyikan password' : 'Tampilkan password';
+                b.setAttribute('aria-label', b.title);
+                inp.focus();
+            });
+            bungkus.appendChild(b);
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => pasangTombolMata());
+    else setTimeout(() => pasangTombolMata(), 0);
+
     // --- Lupa password (Code.gs v4) ---
     // Kode 6 angka dikirim ke email akun terdaftar, lalu guru membuat password baru dan langsung masuk.
     const VERSI_LUPA_PASSWORD = 4;
@@ -786,6 +816,7 @@ window.AGENDA_GURU_LOADED = true;
             showCancelButton: true, confirmButtonText: 'Simpan &amp; Masuk', cancelButtonText: 'Batal',
             showLoaderOnConfirm: true, allowOutsideClick: false,
             didOpen: () => {
+                pasangTombolMata(Swal.getHtmlContainer());
                 const kode = document.getElementById('rp-kode');
                 kode.addEventListener('input', () => { kode.value = kode.value.replace(/\D/g, '').slice(0, 6); });
                 kode.focus();
@@ -829,6 +860,7 @@ window.AGENDA_GURU_LOADED = true;
                 '<input type="password" id="cp-new" class="swal2-input" placeholder="Password baru (min. 6 karakter)">' +
                 '<input type="password" id="cp-new2" class="swal2-input" placeholder="Ulangi password baru">',
             showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Batal', focusConfirm: false,
+            didOpen: () => pasangTombolMata(Swal.getHtmlContainer()),
             preConfirm: () => {
                 const o = document.getElementById('cp-old').value, n = document.getElementById('cp-new').value, n2 = document.getElementById('cp-new2').value;
                 if (!o || !n) { Swal.showValidationMessage('Semua kolom wajib diisi'); return false; }

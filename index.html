@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgendaGuru - Manajemen Kelas Digital</title>
-    <script src="api.js?v=20261110203458"></script>
+    <script src="api.js?v=20261110210102"></script>
 
     <script>
         // Penangkap error global.
@@ -1024,6 +1024,16 @@
                 page-break-after: auto;
             }
         }
+        /* Tombol mata password */
+        .mata-bungkus { position: relative; }
+        .mata-bungkus > input { padding-right: 44px !important; }
+        .mata-tombol { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); border: 0; background: none;
+            color: #6B778C; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 1.1rem; cursor: pointer; }
+        .mata-tombol:hover { color: var(--navy-deep); background: rgba(23, 43, 77, .06); }
+        .mata-tombol:focus-visible { outline: 2px solid var(--teal-accent); outline-offset: 1px; }
+        .mata-swal { width: fit-content; max-width: calc(100% - 4em); margin: 1em auto 3px; }
+        .mata-swal > .swal2-input { margin: 0; max-width: 100%; box-sizing: border-box; }
+
         /* Tur panduan pengguna baru */
         #tur-lapis { position: fixed; inset: 0; z-index: 2000; background: transparent; }
         #tur-lapis.gelap { background: rgba(15, 23, 42, 0.6); }
@@ -3429,7 +3439,7 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="app.js?v=20261110203458"></script>
+    <script src="app.js?v=20261110210102"></script>
     
 </body>
 
