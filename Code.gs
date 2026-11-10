@@ -20,7 +20,8 @@ const SUPPORT_WA = '6285788408882';
 // yang masih memakai Code.gs lama untuk memperbaruinya.
 // v2: koleksi tambahan otomatis (sheet "X_..."), dipakai Pengolah Nilai.
 // v3: lisensi (kode lisensi diverifikasi ke server lisensi penjual).
-const API_VERSION = 3;
+// v4: lupa password (kode lewat email / menu Spreadsheet) dan penguncian fungsi perawatan.
+const API_VERSION = 4;
 // Alamat Aplikasi Web server lisensi milik penjual (berakhiran /exec).
 const LICENSE_SERVER_URL = 'https://script.google.com/macros/s/AKfycbzyQBF32jM2Gwr5ShNV1Ga2O3X3XqFed9OdPt8jgtparnbIMVozwZW2PJ2RiAJcS-7uTg/exec';
 
@@ -48,6 +49,8 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('AgendaGuru')
     .addItem('Buka Aplikasi', 'menuBukaAplikasi')
     .addItem('Cara Mengaktifkan Aplikasi', 'menuCaraAktifkan')
+    .addSeparator()
+    .addItem('Atur Ulang Password Login', 'menuAturUlangPassword')
     .addToUi();
 }
 
@@ -87,6 +90,7 @@ function menuCaraAktifkan() {
  * pembeli bersih. Jangan dijalankan di Spreadsheet yang dipakai mengajar.
  */
 function bersihkanTemplate() {
+  hanyaPemilik_();
   const p = PropertiesService.getScriptProperties();
   p.deleteAllProperties();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -203,6 +207,8 @@ function doPost(e) {
     loginAccount: loginAccount,
     logoutAccount: logoutAccount,
     changePassword: changePassword,
+    mintaKodeResetPassword: mintaKodeResetPassword,
+    resetPasswordDenganKode: resetPasswordDenganKode,
     getAllData: getAllData,
     saveAllData: saveAllData,
     uploadFileToDrive: uploadFileToDrive,
@@ -295,7 +301,7 @@ function activateLicense(token, key) {
 
 /** Buat sheet otomatis saat pertama dipakai, jadi guru tidak perlu menjalankan setupDatabase. */
 function ensureDatabase_() {
-  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config')) setupDatabase();
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config')) setupDatabase_();
 }
 
 // Kolom TahunPelajaran supaya absensi/nilai bulan yang sama di tahun berbeda tidak saling menimpa.
@@ -341,7 +347,7 @@ function setPassword_(email, password) {
 function migrateLegacyAuth_() {
   if (props_().getProperty('AUTH_HASH')) return;
   const config = {};
-  cleanData('Config').forEach(row => { config[row.Key] = row.Value; });
+  cleanData_('Config').forEach(row => { config[row.Key] = row.Value; });
   if (!config.registeredEmail || !config.registeredPassword) return;
   setPassword_(config.registeredEmail, String(config.registeredPassword));
   delete config.registeredPassword;
@@ -396,7 +402,7 @@ function registerAccount(name, email, password, licenseKey) {
     setPassword_(email, String(password));
 
     const config = {};
-    cleanData('Config').forEach(row => { config[row.Key] = row.Value; });
+    cleanData_('Config').forEach(row => { config[row.Key] = row.Value; });
     delete config.registeredPassword;
     config.registeredEmail = email;
     config.userName = name || config.userName || 'Guru';
@@ -451,6 +457,7 @@ function changePassword(token, oldPassword, newPassword) {
  * dan daftar ulang dengan email/password baru.
  */
 function resetAkunLogin() {
+  hanyaPemilik_();
   const p = props_();
   const all = p.getProperties();
   Object.keys(all).forEach(k => {
@@ -458,12 +465,167 @@ function resetAkunLogin() {
   });
   // Pastikan password lama (format lama) tidak ikut termigrasi ulang
   const config = {};
-  cleanData('Config').forEach(row => { config[row.Key] = row.Value; });
+  cleanData_('Config').forEach(row => { config[row.Key] = row.Value; });
   delete config.registeredPassword;
   delete config.registeredEmail;
   writeSheet_(SpreadsheetApp.getActiveSpreadsheet(), 'Config', ['Key', 'Value'],
     Object.keys(config).map(k => ({Key: k, Value: config[k]})));
   console.log('Akun login direset. Buka aplikasi lalu daftar ulang. Data kelas/siswa/nilai tetap ada.');
+}
+
+/* =====================================================================
+ * LUPA PASSWORD
+ * 1) Dari halaman login: kode 6 angka dikirim ke email akun terdaftar
+ *    (dikirim lewat Gmail pemilik Spreadsheet), lalu guru membuat password baru.
+ * 2) Dari Spreadsheet: menu AgendaGuru → Atur Ulang Password Login.
+ * Data tidak pernah dihapus. Semua perangkat yang masih masuk akan keluar.
+ * ===================================================================== */
+const RESET_BERLAKU_MENIT = 15;
+const RESET_MAKS_COBA = 5;       // salah kode lebih dari ini: kode hangus
+const RESET_MAKS_KIRIM_HARIAN = 5;
+
+function samarkanEmail_(email) {
+  const m = String(email || '').match(/^([^@]+)@(.+)$/);
+  if (!m) return '';
+  const nama = m[1];
+  const awal = nama.slice(0, Math.min(2, nama.length - 1 || 1));
+  return awal + '*'.repeat(Math.max(3, nama.length - awal.length)) + '@' + m[2];
+}
+
+function hapusSemuaSesi_() {
+  const p = props_(), all = p.getProperties();
+  Object.keys(all).forEach(k => { if (k.indexOf('SESS_') === 0) p.deleteProperty(k); });
+}
+
+function hapusKodeReset_() {
+  const p = props_();
+  ['RESET_HASH', 'RESET_SALT', 'RESET_EXP', 'RESET_TRY'].forEach(k => p.deleteProperty(k));
+}
+
+/** Kirim kode atur ulang password ke email akun terdaftar. */
+function mintaKodeResetPassword() {
+  if (!isRegistered_()) return { ok: false, notRegistered: true, message: 'Belum ada akun terdaftar. Silakan daftar akun baru.' };
+  const cache = CacheService.getScriptCache();
+  if (cache.get('RESET_JEDA')) return { ok: false, message: 'Kode baru saja dikirim. Tunggu 1 menit sebelum meminta kode lagi.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const p = props_();
+    const hari = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd');
+    const catatan = String(p.getProperty('RESET_HARIAN') || '').split('|');
+    const jumlah = catatan[0] === hari ? Number(catatan[1]) || 0 : 0;
+    if (jumlah >= RESET_MAKS_KIRIM_HARIAN) {
+      return { ok: false, message: 'Batas permintaan kode hari ini sudah tercapai. Coba lagi besok, atau atur ulang password lewat menu AgendaGuru di Spreadsheet Anda.' };
+    }
+    const email = p.getProperty('AUTH_EMAIL');
+    const acak = parseInt(Utilities.getUuid().replace(/-/g, '').slice(0, 12), 16);
+    const kode = String(acak % 1000000).padStart(6, '0');
+    const salt = newRandomToken_();
+    p.setProperties({
+      RESET_SALT: salt,
+      RESET_HASH: hashPassword_(kode, salt),
+      RESET_EXP: String(Date.now() + RESET_BERLAKU_MENIT * 60 * 1000),
+      RESET_TRY: '0',
+      RESET_HARIAN: hari + '|' + (jumlah + 1)
+    });
+    MailApp.sendEmail({
+      to: email,
+      name: 'AgendaGuru',
+      subject: 'Kode atur ulang password AgendaGuru: ' + kode,
+      body: 'Kode atur ulang password AgendaGuru Anda: ' + kode + '\n\nKode berlaku ' + RESET_BERLAKU_MENIT +
+        ' menit. Jika Anda tidak meminta kode ini, abaikan email ini; password Anda tidak berubah.',
+      htmlBody: '<div style="font-family:Arial,sans-serif;color:#172B4D;max-width:480px">' +
+        '<h2 style="margin:0 0 8px">Atur Ulang Password AgendaGuru</h2>' +
+        '<p>Masukkan kode berikut di halaman login AgendaGuru:</p>' +
+        '<div style="font-size:30px;font-weight:700;letter-spacing:8px;background:#E5F6F5;color:#0E7778;padding:14px 18px;border-radius:10px;text-align:center">' + kode + '</div>' +
+        '<p style="color:#5E6C84;font-size:13px">Kode berlaku ' + RESET_BERLAKU_MENIT + ' menit. Jika Anda tidak meminta kode ini, abaikan email ini; password Anda tidak berubah dan data Anda tetap aman.</p></div>'
+    });
+    cache.put('RESET_JEDA', '1', 60);
+    return { ok: true, email: samarkanEmail_(email), menit: RESET_BERLAKU_MENIT };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Buat password baru dengan kode dari email. Berhasil: langsung masuk. */
+function resetPasswordDenganKode(kode, passwordBaru) {
+  kode = String(kode || '').replace(/\D/g, '');
+  passwordBaru = String(passwordBaru || '');
+  if (passwordBaru.length < 6) return { ok: false, message: 'Password baru minimal 6 karakter.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const p = props_();
+    const hash = p.getProperty('RESET_HASH');
+    if (!hash || Number(p.getProperty('RESET_EXP')) < Date.now()) {
+      hapusKodeReset_();
+      return { ok: false, kodeHangus: true, message: 'Kode sudah tidak berlaku. Minta kode baru.' };
+    }
+    if (hashPassword_(kode, p.getProperty('RESET_SALT')) !== hash) {
+      const coba = (Number(p.getProperty('RESET_TRY')) || 0) + 1;
+      if (coba >= RESET_MAKS_COBA) {
+        hapusKodeReset_();
+        return { ok: false, kodeHangus: true, message: 'Kode salah terlalu sering. Minta kode baru.' };
+      }
+      p.setProperty('RESET_TRY', String(coba));
+      return { ok: false, message: 'Kode salah. Sisa percobaan: ' + (RESET_MAKS_COBA - coba) + '.' };
+    }
+    setPassword_(p.getProperty('AUTH_EMAIL'), passwordBaru);
+    hapusKodeReset_();
+    hapusSemuaSesi_();
+    CacheService.getScriptCache().remove('LOGIN_FAILS');
+  } finally {
+    lock.releaseLock();
+  }
+  return { ok: true, token: createSession_(), data: withLicense_(readAllData_()) };
+}
+
+/** Menu Spreadsheet: atur ulang password tanpa email (hanya bisa oleh pemilik Spreadsheet). */
+function menuAturUlangPassword() {
+  const ui = SpreadsheetApp.getUi();
+  if (!isRegistered_()) {
+    ui.alert('Atur Ulang Password', 'Belum ada akun terdaftar. Buka aplikasi lalu daftar akun baru.', ui.ButtonSet.OK);
+    return;
+  }
+  const email = props_().getProperty('AUTH_EMAIL');
+  const r1 = ui.prompt('Atur Ulang Password Login',
+    'Email login Anda: ' + email + '\n\nKetik password baru (minimal 6 karakter):', ui.ButtonSet.OK_CANCEL);
+  if (r1.getSelectedButton() !== ui.Button.OK) return;
+  const baru = r1.getResponseText();
+  if (String(baru).length < 6) { ui.alert('Password minimal 6 karakter. Silakan ulangi.'); return; }
+  const r2 = ui.prompt('Atur Ulang Password Login', 'Ketik ulang password baru:', ui.ButtonSet.OK_CANCEL);
+  if (r2.getSelectedButton() !== ui.Button.OK) return;
+  if (r2.getResponseText() !== baru) { ui.alert('Kedua password tidak sama. Silakan ulangi.'); return; }
+  setPassword_(email, baru);
+  hapusKodeReset_();
+  hapusSemuaSesi_();
+  CacheService.getScriptCache().remove('LOGIN_FAILS');
+  ui.alert('Berhasil', 'Password sudah diganti. Masuk ke aplikasi dengan email ' + email +
+    ' dan password baru. Perangkat lain yang masih masuk perlu login ulang.', ui.ButtonSet.OK);
+}
+
+/**
+ * IZIN BARU: jalankan sekali dari editor setelah memperbarui Code.gs (pilih izinkanAkses lalu klik Jalankan,
+ * kemudian Izinkan). Aman: tidak mengubah data, hanya mengaktifkan izin kirim email kode lupa password.
+ */
+function izinkanAkses() {
+  const sisa = MailApp.getRemainingDailyQuota();
+  const pemilik = Session.getEffectiveUser().getEmail();
+  Session.getActiveUser().getEmail();
+  console.log('Izin aktif untuk ' + pemilik + '. Sisa kuota email hari ini: ' + sisa + '. Sekarang buat versi deployment baru.');
+}
+
+/**
+ * Fungsi perawatan (dijalankan dari editor) tidak boleh dipanggil orang lain lewat link aplikasi.
+ * Lolos hanya jika yang menjalankan adalah pemilik skrip.
+ */
+function hanyaPemilik_() {
+  let aktif = '', efektif = '';
+  try { aktif = Session.getActiveUser().getEmail(); } catch (e) { }
+  try { efektif = Session.getEffectiveUser().getEmail(); } catch (e) { }
+  if (!aktif || aktif !== efektif) {
+    throw new Error('Fungsi ini hanya bisa dijalankan pemilik Spreadsheet dari editor Apps Script.');
+  }
 }
 
 /**
@@ -472,6 +634,11 @@ function resetAkunLogin() {
  * dan memastikan seluruh kolom data diformat sebagai Teks (lihat catatan di writeSheet_).
  */
 function setupDatabase() {
+  hanyaPemilik_();
+  setupDatabase_();
+}
+
+function setupDatabase_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheets = [
     {name: 'Config', headers: ['Key', 'Value']},
@@ -512,7 +679,7 @@ function setupDatabase() {
 /**
  * Helper function untuk membaca Sheet menjadi array of object
  */
-function cleanData(sheetName) {
+function cleanData_(sheetName) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   if (!sheet) return [];
 
@@ -547,34 +714,34 @@ function getAllData(token) {
 }
 
 function readAllData_() {
-  const configData = cleanData('Config');
+  const configData = cleanData_('Config');
   let configObj = {};
   configData.forEach(row => { configObj[row.Key] = row.Value; });
   delete configObj.registeredPassword; // jangan pernah kirim password ke browser
   configObj.registeredEmail = props_().getProperty('AUTH_EMAIL') || configObj.registeredEmail || '';
   configObj._rev = Number(configObj._rev) || 0;
 
-  const subjectsData = cleanData('Subjects').map(row => row.SubjectName);
+  const subjectsData = cleanData_('Subjects').map(row => row.SubjectName);
 
   const result = {
     config: configObj,
-    classes: cleanData('Classes'),
-    students: cleanData('Students'),
-    attendance: cleanData('Attendance'),
-    grades: cleanData('Grades'),
-    koku: cleanData('Koku'),
-    ekskul: cleanData('Ekskul'),
-    journal: cleanData('Journal'),
-    schedule: cleanData('Schedule'),
+    classes: cleanData_('Classes'),
+    students: cleanData_('Students'),
+    attendance: cleanData_('Attendance'),
+    grades: cleanData_('Grades'),
+    koku: cleanData_('Koku'),
+    ekskul: cleanData_('Ekskul'),
+    journal: cleanData_('Journal'),
+    schedule: cleanData_('Schedule'),
     subjects: subjectsData,
-    poin: cleanData('Poin'),
-    tpBank: cleanData('TPBank'),
-    raporNotes: cleanData('RaporNotes')
+    poin: cleanData_('Poin'),
+    tpBank: cleanData_('TPBank'),
+    raporNotes: cleanData_('RaporNotes')
   };
   // Koleksi tambahan dari fitur baru (sheet berawalan "X_"), mis. X_nilaiAkhir -> result.nilaiAkhir
   SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(sh => {
     const name = sh.getName();
-    if (name.indexOf(EXTRA_PREFIX) === 0) result[name.slice(EXTRA_PREFIX.length)] = cleanData(name);
+    if (name.indexOf(EXTRA_PREFIX) === 0) result[name.slice(EXTRA_PREFIX.length)] = cleanData_(name);
   });
   return result;
 }
@@ -674,7 +841,7 @@ function saveAllData(dbString, token, baseRev, force) {
     // dinaikkan di sini, di server, sehingga menjadi satu penghitung tunggal yang sama-sama
     // dipakai oleh semua perangkat — tidak peduli perangkat mana yang terakhir menyimpan.
     const currentConfig = {};
-    cleanData('Config').forEach(row => { currentConfig[row.Key] = row.Value; });
+    cleanData_('Config').forEach(row => { currentConfig[row.Key] = row.Value; });
     const currentRev = Number(currentConfig._rev) || 0;
 
     // CEGAH DATA TERTIMPA: perangkat hanya boleh menyimpan jika data yang dia ubah
@@ -731,6 +898,7 @@ function saveAllData(dbString, token, baseRev, force) {
  * perangkat tersebut tidak menimpa balik data yang baru saja diperbaiki ini.
  */
 function repairLegacyDataTypes() {
+  hanyaPemilik_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   function fixMonthYearColumn(sheetName, colIndex) {
@@ -785,9 +953,10 @@ function repairLegacyDataTypes() {
  * (di menu profil) di setiap perangkat yang pernah dipakai.
  */
 function migrateKokuSchema() {
+  hanyaPemilik_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('Koku');
-  if (!sheet) { setupDatabase(); return; }
+  if (!sheet) { setupDatabase_(); return; }
 
   const newHeaders = ['RecordID', 'ClassID', 'Tanggal', 'Jenis', 'Projek', 'Deskripsi', 'Dimensi', 'KokuData'];
   const currentHeaders = sheet.getLastColumn() > 0 ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0] : [];
@@ -798,7 +967,7 @@ function migrateKokuSchema() {
   }
 
   // Baca data lama (format lama: Siswa, Kategori, Narasi) SEBELUM header ditimpa
-  const oldRows = cleanData('Koku');
+  const oldRows = cleanData_('Koku');
 
   // Cadangkan data lama apa adanya, untuk jaga-jaga
   if (oldRows.length > 0) {
@@ -812,7 +981,7 @@ function migrateKokuSchema() {
   }
 
   // Petakan nama siswa -> ClassID memakai data Siswa saat ini, lalu kelompokkan nilai lama per kelas
-  const students = cleanData('Students');
+  const students = cleanData_('Students');
   const nameToStudent = {};
   students.forEach(s => { nameToStudent[s.StudentName] = s; });
 
@@ -856,6 +1025,7 @@ function migrateKokuSchema() {
  * beserta file di dalamnya (yang dulu dibagikan "siapa saja yang memiliki link").
  */
 function jadikanFolderBuktiPrivat() {
+  hanyaPemilik_();
   var folders = DriveApp.getFoldersByName("AgendaGuru_Bukti");
   var count = 0;
   while (folders.hasNext()) {

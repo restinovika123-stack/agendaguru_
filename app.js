@@ -735,6 +735,91 @@ window.AGENDA_GURU_LOADED = true;
         }
     }
 
+    // --- Lupa password (Code.gs v4) ---
+    // Kode 6 angka dikirim ke email akun terdaftar, lalu guru membuat password baru dan langsung masuk.
+    const VERSI_LUPA_PASSWORD = 4;
+    const WA_BANTUAN = 'https://wa.me/6285788408882?text=' + encodeURIComponent('Halo, saya lupa password AgendaGuru dan butuh bantuan.');
+    function serverJanji(fn, args) {
+        return new Promise((ok, gagal) => google.script.run.withSuccessHandler(ok).withFailureHandler(gagal)[fn](...(args || [])));
+    }
+    const pesanGagalServer = err => 'Tidak bisa terhubung ke server: ' + ((err && err.message) || err);
+    const CARA_LEWAT_SPREADSHEET = '<div class="small text-start mt-3 p-2 rounded" style="background:#F5F7FA;line-height:1.5">' +
+        '<b>Tidak menerima email?</b> Buka Google Spreadsheet AgendaGuru Anda, lalu klik menu <b>AgendaGuru → Atur Ulang Password Login</b>.</div>';
+
+    async function lupaPassword() {
+        if (!IS_GAS) {
+            return Swal.fire({ icon: 'info', title: 'Lupa Password', html: 'Di aplikasi asli, guru cukup meminta <b>kode 6 angka</b> yang dikirim ke email terdaftar, lalu membuat password baru. Data tidak terhapus.' });
+        }
+        const info = window.AGENDA_SERVER_INFO;
+        if (info && Number(info.apiVersion || 0) < VERSI_LUPA_PASSWORD) {
+            const r = await Swal.fire({
+                icon: 'info', title: 'Perbarui Code.gs Dulu',
+                html: 'Fitur lupa password memerlukan Code.gs terbaru. <a href="' + LINK_PANDUAN_UPDATE + '" target="_blank" rel="noopener">Lihat cara memperbarui</a> (data tetap aman), atau hubungi kami lewat WhatsApp.',
+                showCancelButton: true, confirmButtonText: '<i class="bi bi-whatsapp"></i> Hubungi WhatsApp', cancelButtonText: 'Tutup'
+            });
+            if (r.isConfirmed) window.open(WA_BANTUAN, '_blank', 'noopener');
+            return;
+        }
+        const r = await Swal.fire({
+            icon: 'question', title: 'Lupa Password?',
+            html: '<p class="mb-0">Kami akan mengirim <b>kode 6 angka</b> ke email yang terdaftar di aplikasi ini. Data Anda tidak akan terhapus.</p>' + CARA_LEWAT_SPREADSHEET,
+            showCancelButton: true, confirmButtonText: 'Kirim Kode ke Email', cancelButtonText: 'Batal',
+            showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+            preConfirm: () => serverJanji('mintaKodeResetPassword').then(res => {
+                if (res && res.ok) return res;
+                if (res && res.notRegistered) { Swal.close(); toggleAuthMode('register'); return false; }
+                Swal.showValidationMessage((res && res.message) || 'Kode gagal dikirim.');
+                return false;
+            }, err => { Swal.showValidationMessage(pesanGagalServer(err)); return false; })
+        });
+        if (r.isConfirmed && r.value) formKodeResetPassword(r.value);
+    }
+
+    async function formKodeResetPassword(kirim) {
+        const r = await Swal.fire({
+            title: 'Buat Password Baru',
+            html: `<p class="small text-muted mb-1">Kode dikirim ke <b>${escapeHtml(kirim.email || 'email terdaftar')}</b>. Berlaku ${Number(kirim.menit) || 15} menit. Cek juga folder <b>Spam</b>.</p>
+                <input id="rp-kode" class="swal2-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="Kode 6 angka">
+                <input id="rp-pass" type="password" class="swal2-input" autocomplete="new-password" placeholder="Password baru (min. 6 karakter)">
+                <input id="rp-pass2" type="password" class="swal2-input" autocomplete="new-password" placeholder="Ulangi password baru">
+                <div class="mt-2"><button type="button" id="rp-ulang" class="btn btn-link btn-sm text-decoration-none">Kirim ulang kode</button></div>`,
+            showCancelButton: true, confirmButtonText: 'Simpan &amp; Masuk', cancelButtonText: 'Batal',
+            showLoaderOnConfirm: true, allowOutsideClick: false,
+            didOpen: () => {
+                const kode = document.getElementById('rp-kode');
+                kode.addEventListener('input', () => { kode.value = kode.value.replace(/\D/g, '').slice(0, 6); });
+                kode.focus();
+                const ulang = document.getElementById('rp-ulang');
+                ulang.addEventListener('click', () => {
+                    ulang.disabled = true; ulang.textContent = 'Mengirim...';
+                    serverJanji('mintaKodeResetPassword').then(res => {
+                        Swal.resetValidationMessage();
+                        if (res && res.ok) ulang.textContent = 'Kode baru sudah dikirim';
+                        else { Swal.showValidationMessage((res && res.message) || 'Kode gagal dikirim.'); ulang.textContent = 'Kirim ulang kode'; }
+                        setTimeout(() => { ulang.disabled = false; ulang.textContent = 'Kirim ulang kode'; }, 60000);
+                    }, err => { Swal.showValidationMessage(pesanGagalServer(err)); ulang.disabled = false; ulang.textContent = 'Kirim ulang kode'; });
+                });
+            },
+            preConfirm: () => {
+                const kode = document.getElementById('rp-kode').value.trim();
+                const p1 = document.getElementById('rp-pass').value, p2 = document.getElementById('rp-pass2').value;
+                if (!/^\d{6}$/.test(kode)) return Swal.showValidationMessage('Masukkan kode 6 angka dari email.'), false;
+                if (p1.length < 6) return Swal.showValidationMessage('Password baru minimal 6 karakter.'), false;
+                if (p1 !== p2) return Swal.showValidationMessage('Kedua password baru tidak sama.'), false;
+                return serverJanji('resetPasswordDenganKode', [kode, p1]).then(res => {
+                    if (res && res.ok) return res;
+                    Swal.showValidationMessage((res && res.message) || 'Password gagal diganti.');
+                    return false;
+                }, err => { Swal.showValidationMessage(pesanGagalServer(err)); return false; });
+            }
+        });
+        if (!r.isConfirmed || !r.value) return;
+        setToken(r.value.token);
+        ['loginPass', 'regPass'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        await applyServerData(r.value.data);
+        Swal.fire({ icon: 'success', title: 'Password Berhasil Diganti', text: 'Anda sudah masuk. Gunakan password baru saat login berikutnya.', timer: 2500, showConfirmButton: false });
+    }
+
     // Ganti password (mode GAS) dari menu profil
     async function changePasswordPrompt() {
         if (!IS_GAS) return Swal.fire('Info', 'Fitur ini hanya berjalan saat aplikasi diakses melalui Google Apps Script.', 'info');
@@ -1058,8 +1143,8 @@ window.AGENDA_GURU_LOADED = true;
     // --- Pemberitahuan pembaruan Code.gs ---
     // Saat merilis Code.gs baru: naikkan API_VERSION di Code.gs DAN angka di bawah ini, isi catatannya,
     // lalu push. Pembeli dengan Code.gs lebih lama mendapat pemberitahuan (aplikasi tetap bisa dipakai).
-    const VERSI_CODEGS_TERBARU = 3;
-    const CATATAN_PEMBARUAN = 'Ada pembaruan AgendaGuru yang memerlukan Code.gs terbaru.';
+    const VERSI_CODEGS_TERBARU = 4;
+    const CATATAN_PEMBARUAN = 'Pembaruan ini menambahkan fitur Lupa Password di halaman login dan pengamanan tambahan untuk data Anda.';
     const LINK_PANDUAN_UPDATE = 'https://agendaguru-id.vercel.app/#update';
     const UPDATE_NANTI_KEY = 'agendaGuru_updateNanti';
 
