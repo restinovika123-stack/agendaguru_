@@ -606,6 +606,8 @@ window.AGENDA_GURU_LOADED = true;
             '<a class="btn btn-sm py-0" style="background:#25D366;color:#fff" target="_blank" rel="noopener" href="' + wa + '"><i class="bi bi-whatsapp"></i> Beli Sekarang</a>';
         document.body.appendChild(b);
         document.body.style.paddingBottom = (b.offsetHeight + 8) + 'px';
+        const sb = document.getElementById('sidebar-menu'); // agar kredit di bawah menu tidak tertutup banner
+        if (sb) sb.style.paddingBottom = (b.offsetHeight + 30) + 'px';
     }
 
     if (document.readyState === 'loading') {
