@@ -775,6 +775,159 @@ window.AGENDA_GURU_LOADED = true;
             setTimeout(() => cekPembaruanCodeGs(0), 1000); // pembaruan penting didahulukan dari ajakan instal
             setTimeout(() => tawarkanInstalAplikasi(MINTA_INSTAL), MINTA_INSTAL ? 800 : 2500);
         }
+        setTimeout(() => mulaiTurOtomatis(0), MINTA_INSTAL ? 2500 : 900); // tur pengguna baru; ajakan instal menunggu tur selesai
+    }
+
+    // --- Tur panduan untuk pengguna baru ---
+    // Tampil otomatis sekali saat pertama masuk (belum ada kelas, atau di mode demo).
+    // Bisa diulang kapan saja dari tombol (?) di bilah atas atau menu Profil.
+    const TUR_KEY = 'agendaGuru_tur_v1';
+    const turMenu = v => `#sidebar-menu a[onclick="switchView('${v}')"]`;
+    const TUR_LANGKAH = [
+        { judul: 'Selamat datang di AgendaGuru! 👋', isi: 'Tur singkat ini menunjukkan menu utama dan urutan memakainya. Hanya sekitar 1 menit.' },
+        { el: turMenu('profil'), judul: 'Profil Sekolah & Guru', isi: 'Isi pertama kali: nama sekolah, kota, kepala sekolah, NIP, dan logo. Data ini otomatis tercetak di kop dan tanda tangan semua dokumen yang diunduh.' },
+        { el: turMenu('kelas'), judul: 'Manajemen Kelas', isi: 'Buat kelas, lalu tambahkan siswa satu per satu atau impor sekaligus dari file Excel.' },
+        { el: turMenu('jadwal'), judul: 'Jadwal Pelajaran', isi: 'Masukkan jadwal mengajar Anda per hari supaya mudah dilihat setiap pagi.' },
+        { el: turMenu('absensi'), judul: 'Absensi Siswa', isi: 'Isi kehadiran setiap pertemuan. Kolom baru otomatis terisi H (Hadir), tinggal ubah siswa yang sakit, izin, atau alpa. Rekap bisa diunduh ke Excel atau dikirim ke WhatsApp orang tua.' },
+        { el: turMenu('nilai'), judul: 'Data Nilai', isi: 'Masukkan nilai harian (PH), PTS, dan PAS. Hasilnya bisa diunduh dalam format Excel sekolah yang siap dicetak.' },
+        { el: turMenu('jurnal'), judul: 'Jurnal Harian', isi: 'Catat materi dan kegiatan mengajar setiap hari sebagai jurnal guru.' },
+        { el: turMenu('poin'), judul: 'Poin Siswa', isi: 'Catat prestasi dan pelanggaran siswa. Data poin ini juga dipakai untuk membuat catatan wali kelas di rapor secara otomatis.' },
+        { el: turMenu('kokurikuler'), judul: 'Menu Pelengkap', isi: 'Nilai Kokurikuler, Nilai Ekstrakurikuler, Pengolah Nilai, dan Rekap Laporan melengkapi administrasi Anda di akhir semester.' },
+        { el: turMenu('rapor'), judul: 'Cetak Rapor Siswa', isi: 'Rapor tersusun otomatis dari nilai, absensi, dan catatan. Atur fase dan tanggal rapor, lalu cetak langsung atau unduh PDF.' },
+        { el: '#global-tapel', judul: 'Tahun Pelajaran', isi: 'Pilih tahun pelajaran yang aktif di sini. Absensi, nilai, dan rapor mengikuti pilihan ini.' },
+        { el: '#btn-tur-panduan', judul: 'Ulangi Tur Kapan Saja', isi: 'Klik tombol ini untuk melihat tur lagi. Klik foto profil di sebelahnya untuk ganti password atau memasang aplikasi di HP dan laptop.' },
+        { akhir: true, judul: 'Siap Digunakan! 🎉', isi: 'Mulailah dari <b>Profil Sekolah &amp; Guru</b>, lalu <b>Manajemen Kelas</b>. Selamat bekerja!' }
+    ];
+    let turIdx = -1, turSesudah = null, turTimer = null;
+
+    function turAktif() { return turIdx >= 0; }
+    function turSudahDilihat() { try { return !!localStorage.getItem(TUR_KEY); } catch (e) { return false; } }
+    function perluTurOtomatis() { return !turSudahDilihat() && (!!window.AGENDA_DEMO || !(db.classes || []).length); }
+
+    // Dipanggil sesudah aplikasi tampil; menunggu bila ada pemberitahuan lain yang sedang terbuka.
+    function mulaiTurOtomatis(percobaan) {
+        if (!perluTurOtomatis() || turAktif()) return;
+        const sibuk = (typeof Swal !== 'undefined' && Swal.isVisible()) || document.querySelector('.modal.show');
+        if (sibuk) { if ((percobaan || 0) < 20) setTimeout(() => mulaiTurOtomatis((percobaan || 0) + 1), 2000); return; }
+        mulaiTur();
+    }
+
+    function mulaiTur() {
+        if (turAktif()) return;
+        if (typeof Swal !== 'undefined' && Swal.isVisible()) Swal.close();
+        document.querySelectorAll('.modal.show').forEach(m => { const x = window.bootstrap && bootstrap.Modal.getInstance(m); if (x) x.hide(); });
+        const buat = (id) => { const d = document.createElement('div'); d.id = id; document.body.appendChild(d); return d; };
+        buat('tur-lapis');
+        buat('tur-sorot');
+        const k = buat('tur-kartu');
+        k.setAttribute('role', 'dialog'); k.setAttribute('aria-live', 'polite');
+        turIdx = 0;
+        window.addEventListener('resize', posisiTur);
+        document.addEventListener('scroll', posisiTur, true); // menu samping bergulir halus
+        document.addEventListener('keydown', tombolTur);
+        tampilkanLangkahTur();
+    }
+
+    function tombolTur(e) {
+        if (!turAktif()) return;
+        if (e.key === 'Escape') akhiriTur();
+        else if (e.key === 'ArrowRight') langkahTur(1);
+        else if (e.key === 'ArrowLeft') langkahTur(-1);
+    }
+
+    function langkahTur(arah) {
+        const n = turIdx + arah;
+        if (n < 0) return;
+        if (n >= TUR_LANGKAH.length) return akhiriTur();
+        turIdx = n; tampilkanLangkahTur();
+    }
+
+    function tampilkanLangkahTur() {
+        const L = TUR_LANGKAH[turIdx], total = TUR_LANGKAH.length;
+        const k = document.getElementById('tur-kartu');
+        if (!k) return;
+        // Di HP/tablet menu samping tersembunyi: buka saat langkah menyorot menu
+        const kecil = window.innerWidth < 992, sb = document.getElementById('sidebar-menu');
+        let tunggu = 0;
+        if (kecil && sb) {
+            const diMenu = !!(L.el && L.el.indexOf('#sidebar-menu') === 0);
+            if (diMenu !== sb.classList.contains('show')) tunggu = 330;
+            sb.classList.toggle('show', diMenu);
+            document.getElementById('sidebar-overlay')?.classList.remove('show');
+        }
+        const kurang = (L.akhir && typeof profilKurang === 'function') ? profilKurang().length > 0 : false;
+        const titik = TUR_LANGKAH.map((_, i) => `<span class="${i === turIdx ? 'aktif' : ''}"></span>`).join('');
+        const kiri = turIdx === 0
+            ? '<button type="button" class="btn btn-link btn-sm text-muted px-0" onclick="akhiriTur()">Lewati tur</button>'
+            : '<button type="button" class="btn btn-outline-secondary btn-sm" onclick="langkahTur(-1)">Kembali</button>';
+        const kanan = (L.akhir && kurang)
+            ? `<button type="button" class="btn btn-primary btn-sm" onclick="akhiriTur(); switchView('profil')">Isi Profil Sekolah</button>`
+            : `<button type="button" class="btn btn-primary btn-sm" onclick="langkahTur(1)">${turIdx === 0 ? 'Mulai Tur' : (L.akhir ? 'Selesai' : 'Lanjut')}</button>`;
+        k.innerHTML = `
+            <div class="tur-kepala"><span>Langkah ${turIdx + 1} dari ${total}</span>
+                <button type="button" class="tur-tutup" aria-label="Tutup tur" onclick="akhiriTur()">&times;</button></div>
+            <h6>${L.judul}</h6>
+            <p>${L.isi}</p>
+            <div class="tur-titik">${titik}</div>
+            <div class="tur-aksi">${kiri}${kanan}</div>`;
+        k.style.visibility = 'hidden';
+        clearTimeout(turTimer);
+        turTimer = setTimeout(() => {
+            const el = L.el && document.querySelector(L.el);
+            if (el && el.scrollIntoView) el.scrollIntoView({ block: L.el.indexOf('#sidebar-menu') === 0 ? 'center' : 'nearest' });
+            posisiTur();
+            setTimeout(posisiTur, 450); // setelah guliran halus selesai
+            k.style.visibility = 'visible';
+            const b = k.querySelector('.tur-aksi .btn-primary'); if (b) b.focus({ preventScroll: true });
+        }, tunggu);
+    }
+
+    function posisiTur() {
+        if (!turAktif()) return;
+        const L = TUR_LANGKAH[turIdx];
+        const lapis = document.getElementById('tur-lapis'), sorot = document.getElementById('tur-sorot'), k = document.getElementById('tur-kartu');
+        if (!lapis || !sorot || !k) return;
+        const el = L.el && document.querySelector(L.el);
+        const r = el && el.getBoundingClientRect();
+        const ada = !!(r && r.width > 0 && r.height > 0);
+        const W = window.innerWidth, H = window.innerHeight, p = 6, m = 12;
+        lapis.classList.toggle('gelap', !ada);
+        sorot.style.display = ada ? 'block' : 'none';
+        if (ada) {
+            sorot.style.left = (r.left - p) + 'px'; sorot.style.top = (r.top - p) + 'px';
+            sorot.style.width = (r.width + p * 2) + 'px'; sorot.style.height = (r.height + p * 2) + 'px';
+        }
+        const kw = Math.min(340, W - m * 2);
+        k.style.width = kw + 'px';
+        const kh = k.offsetHeight;
+        const batas = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+        let x, y;
+        if (!ada) { x = (W - kw) / 2; y = Math.max(m, (H - kh) / 2); }
+        else if (r.right + 16 + kw <= W - m) { x = r.right + 16; y = batas(r.top + r.height / 2 - kh / 2, m, H - kh - m); }
+        else {
+            x = batas(r.left + r.width / 2 - kw / 2, m, W - kw - m);
+            if (r.bottom + 14 + kh <= H - m) y = r.bottom + 14;
+            else if (r.top - 14 - kh >= m) y = r.top - 14 - kh;
+            else y = H - kh - m;
+        }
+        k.style.left = x + 'px'; k.style.top = y + 'px';
+    }
+
+    function akhiriTur() {
+        if (!turAktif()) return;
+        turIdx = -1;
+        clearTimeout(turTimer);
+        ['tur-lapis', 'tur-sorot', 'tur-kartu'].forEach(id => document.getElementById(id)?.remove());
+        window.removeEventListener('resize', posisiTur);
+        document.removeEventListener('scroll', posisiTur, true);
+        document.removeEventListener('keydown', tombolTur);
+        if (window.innerWidth < 992) {
+            document.getElementById('sidebar-menu')?.classList.remove('show');
+            document.getElementById('sidebar-overlay')?.classList.remove('show');
+        }
+        try { localStorage.setItem(TUR_KEY, String(Date.now())); } catch (e) { }
+        const f = turSesudah; turSesudah = null;
+        if (f) setTimeout(f, 600);
     }
 
     // --- Pasang aplikasi (PWA) di HP, tablet, laptop ---
@@ -845,6 +998,7 @@ window.AGENDA_GURU_LOADED = true;
             if (st.status === 'terpasang') return;
             if (st.status === 'nanti' && Date.now() - (st.at || 0) < 7 * 864e5) return;
         }
+        if (!paksa && turAktif()) { turSesudah = () => tawarkanInstalAplikasi(paksa); return; }
         if (Swal.isVisible()) return setTimeout(() => tawarkanInstalAplikasi(paksa), 3000);
 
         const native = !!window.AGENDA_NATIVE_GAS;
@@ -918,7 +1072,7 @@ window.AGENDA_GURU_LOADED = true;
             const n = JSON.parse(localStorage.getItem(UPDATE_NANTI_KEY) || '{}');
             if (n.versi === VERSI_CODEGS_TERBARU && Date.now() - (n.at || 0) < 3 * 864e5) return; // ditunda 3 hari
         } catch (e) { }
-        if (Swal.isVisible()) return setTimeout(() => cekPembaruanCodeGs(percobaan), 4000);
+        if (Swal.isVisible() || turAktif()) return setTimeout(() => cekPembaruanCodeGs(percobaan), 4000);
         Swal.fire({
             icon: 'info',
             title: 'Pembaruan AgendaGuru Tersedia',
