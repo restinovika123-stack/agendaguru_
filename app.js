@@ -996,7 +996,7 @@ window.AGENDA_GURU_LOADED = true;
         const activeLink = document.querySelector(`.nav-link[onclick*="switchView('${viewId}')"]`);
         if (activeLink) activeLink.classList.add('active');
 
-        let titles = { beranda: "Beranda", kelas: "Manajemen Kelas", absensi: "Absensi Siswa", nilai: "Data Nilai", kokurikuler: "Nilai Kokurikuler", ekstrakurikuler: "Nilai Ekstrakurikuler", jurnal: "Jurnal Harian", jadwal: "Jadwal Pelajaran", poin: "Poin Siswa", pengolah: "Pengolah Nilai", rapor: "Cetak Rapor Siswa", rekap: "Rekap Laporan" };
+        let titles = { beranda: "Beranda", profil: "Profil Sekolah & Guru", kelas: "Manajemen Kelas", absensi: "Absensi Siswa", nilai: "Data Nilai", kokurikuler: "Nilai Kokurikuler", ekstrakurikuler: "Nilai Ekstrakurikuler", jurnal: "Jurnal Harian", jadwal: "Jadwal Pelajaran", poin: "Poin Siswa", pengolah: "Pengolah Nilai", rapor: "Cetak Rapor Siswa", rekap: "Rekap Laporan" };
         document.getElementById('topbar-title').innerText = titles[viewId] || "AgendaGuru";
 
         if (viewId === 'beranda') renderBeranda();
@@ -1011,6 +1011,7 @@ window.AGENDA_GURU_LOADED = true;
         if (viewId === 'rapor') loadRaporViewData();
         if (viewId === 'pengolah') loadPengolahView();
         if (viewId === 'rekap') loadRekapView();
+        if (viewId === 'profil') loadProfilView();
 
         if (window.innerWidth < 992) { document.getElementById('sidebar-menu').classList.remove('show'); document.getElementById('sidebar-overlay').classList.remove('show'); }
     }
@@ -1204,6 +1205,12 @@ window.AGENDA_GURU_LOADED = true;
     // --- Dashboard / Beranda ---
     let dashboardTimer;
     function renderBeranda() {
+        const pa = document.getElementById("beranda-profil-alert");
+        if (pa) {
+            const k = profilKurang();
+            pa.classList.toggle("d-none", !k.length); pa.classList.toggle("d-flex", !!k.length);
+            if (k.length) pa.innerHTML = `<div><i class="bi bi-building me-1"></i> Lengkapi <b>Profil Sekolah & Guru</b> agar kop dan tanda tangan di rapor & dokumen unduhan terisi. Belum diisi: ${escapeHtml(k.join(", "))}.</div><button type="button" class="btn btn-sm btn-warning fw-semibold" onclick="bukaProfilSekolah()">Lengkapi Sekarang</button>`;
+        }
         document.getElementById('stat-siswa').innerText = db.students.length;
         document.getElementById('stat-kelas').innerText = db.classes.length;
         let tH = 0, tS = 0, tI = 0, tA = 0;
@@ -2174,6 +2181,216 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // =====================================================================
+    // PROFIL SEKOLAH & GURU — satu sumber data untuk kop, identitas, dan tanda tangan
+    // seluruh dokumen (rapor, Excel, PDF, Word). Disimpan di Config (tanpa perubahan Code.gs).
+    // =====================================================================
+    function profilSekolah() {
+        const c = (typeof db !== 'undefined' && db && db.config) || {};
+        const t = v => String(v || '').trim();
+        const sekolah = t(c.userSchool);
+        return {
+            sekolah: sekolah === 'Sekolah Saya' ? '' : sekolah, npsn: t(c.schoolNPSN), alamat: t(c.schoolAddress), kota: t(c.schoolCity),
+            kontak: t(c.schoolContact), kop1: t(c.kopBaris1), kop2: t(c.kopBaris2), logo: t(c.schoolLogo),
+            kepsek: t(c.headmasterName), kepsekNip: t(c.headmasterNIP), guru: t(c.userName), guruNip: t(c.userNIP)
+        };
+    }
+    // Teks blok tanda tangan yang sama untuk semua format dokumen
+    function ttdTeks(jabatanKanan) {
+        const p = profilSekolah(), titik = '(...........................................)';
+        const nip = v => 'NIP. ' + (v || '.......................................');
+        return {
+            tempatTanggal: (p.kota ? p.kota : '....................') + ', ' + exTglPanjang(new Date()),
+            jabatanKiri: 'Kepala ' + (p.sekolah || 'Sekolah'), jabatanKanan: (jabatanKanan || 'Guru') + ',',
+            namaKiri: p.kepsek || titik, namaKanan: p.guru || titik, nipKiri: nip(p.kepsekNip), nipKanan: nip(p.guruNip)
+        };
+    }
+    function profilKurang() {
+        const p = profilSekolah(), k = [];
+        if (!p.sekolah) k.push('Nama sekolah'); if (!p.kota) k.push('Kota/Kabupaten');
+        if (!p.kepsek) k.push('Kepala sekolah'); if (!p.guru) k.push('Nama guru');
+        return k;
+    }
+    let profilLogoBaru = null; // null = tidak berubah, '' = dihapus, data URL = logo baru
+
+    function bukaProfilSekolah() {
+        document.querySelectorAll('.modal.show').forEach(m => { try { bootstrap.Modal.getInstance(m)?.hide(); } catch (e) { } });
+        switchView('profil');
+    }
+    function loadProfilView() {
+        const p = profilSekolah(), set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+        set('pf-sekolah', p.sekolah); set('pf-npsn', p.npsn); set('pf-alamat', p.alamat); set('pf-kota', p.kota); set('pf-kontak', p.kontak);
+        set('pf-kop1', p.kop1); set('pf-kop2', p.kop2); set('pf-kepsek', p.kepsek); set('pf-kepsek-nip', p.kepsekNip);
+        set('pf-guru', p.guru); set('pf-guru-nip', p.guruNip);
+        const f = document.getElementById('pf-logo-file'); if (f) f.value = '';
+        profilLogoBaru = null;
+        const form = document.getElementById('form-profil-sekolah');
+        if (form && !form.dataset.siap) { form.dataset.siap = '1'; form.addEventListener('input', renderPratinjauKop); }
+        renderPratinjauKop(); renderStatusProfil();
+    }
+    function renderStatusProfil() {
+        const b = document.getElementById('profil-status-badge'); if (!b) return;
+        const k = profilKurang();
+        b.className = 'badge rounded-pill ' + (k.length ? 'bg-warning text-dark' : 'bg-success');
+        b.innerHTML = k.length ? `<i class="bi bi-exclamation-circle me-1"></i>Belum lengkap: ${escapeHtml(k.join(', '))}` : '<i class="bi bi-check-circle me-1"></i>Lengkap';
+    }
+    function renderPratinjauKop() {
+        const box = document.getElementById('pf-kop-preview'); if (!box) return;
+        const v = id => (document.getElementById(id)?.value || '').trim();
+        const logo = profilLogoBaru !== null ? profilLogoBaru : profilSekolah().logo;
+        const alamat = [v('pf-alamat'), v('pf-npsn') ? 'NPSN ' + v('pf-npsn') : ''].filter(Boolean).join(' · ');
+        box.innerHTML = `<div class="d-flex align-items-center gap-2" style="border-bottom:3px double #172B4D;padding-bottom:6px">
+            ${logo ? `<img src="${logo}" alt="Logo" style="width:46px;height:46px;object-fit:contain">` : '<div style="width:46px"></div>'}
+            <div class="flex-grow-1 text-center" style="line-height:1.25">
+                ${v('pf-kop1') ? `<div style="font-size:.72rem;font-weight:700">${escapeHtml(v('pf-kop1').toUpperCase())}</div>` : ''}
+                ${v('pf-kop2') ? `<div style="font-size:.72rem;font-weight:700">${escapeHtml(v('pf-kop2').toUpperCase())}</div>` : ''}
+                <div style="font-size:.95rem;font-weight:800">${escapeHtml((v('pf-sekolah') || 'NAMA SEKOLAH').toUpperCase())}</div>
+                ${alamat ? `<div style="font-size:.66rem;color:#5E6C84">${escapeHtml(alamat)}</div>` : ''}
+                ${v('pf-kontak') ? `<div style="font-size:.66rem;color:#5E6C84">${escapeHtml(v('pf-kontak'))}</div>` : ''}
+            </div><div style="width:46px"></div></div>
+            <div class="text-center fw-bold mt-2" style="font-size:.8rem;color:#172B4D">JUDUL DOKUMEN</div>`;
+        const hapus = document.getElementById('pf-logo-hapus'); if (hapus) hapus.style.display = logo ? '' : 'none';
+    }
+    // Logo diperkecil (maks. 240 px) agar muat di sheet Config (batas 50.000 karakter per sel)
+    function pilihLogoSekolah(ev) {
+        const file = ev.target.files && ev.target.files[0]; if (!file) return;
+        if (!/^image\/(png|jpeg)$/.test(file.type)) { ev.target.value = ''; return Swal.fire('Format Tidak Didukung', 'Gunakan logo berformat PNG atau JPG.', 'warning'); }
+        const rd = new FileReader();
+        rd.onload = e => {
+            const img = new Image();
+            img.onload = () => {
+                let ukuran = 240, hasil = '';
+                for (let i = 0; i < 6; i++) {
+                    const s = Math.min(1, ukuran / Math.max(img.width, img.height));
+                    const cv = document.createElement('canvas'); cv.width = Math.round(img.width * s); cv.height = Math.round(img.height * s);
+                    const ctx = cv.getContext('2d');
+                    if (file.type === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); }
+                    ctx.drawImage(img, 0, 0, cv.width, cv.height);
+                    hasil = file.type === 'image/png' ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', 0.85);
+                    if (hasil.length <= 45000) break;
+                    if (file.type === 'image/png' && i >= 2) { // PNG masih besar: pakai JPEG berlatar putih
+                        ctx.globalCompositeOperation = 'destination-over'; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+                        hasil = cv.toDataURL('image/jpeg', 0.85); if (hasil.length <= 45000) break;
+                    }
+                    ukuran = Math.round(ukuran * 0.75);
+                }
+                if (hasil.length > 45000) { ev.target.value = ''; return Swal.fire('Logo Terlalu Besar', 'Gunakan gambar logo yang lebih sederhana atau lebih kecil.', 'warning'); }
+                profilLogoBaru = hasil; renderPratinjauKop();
+            };
+            img.onerror = () => Swal.fire('Gagal', 'Gambar logo tidak dapat dibaca.', 'error');
+            img.src = e.target.result;
+        };
+        rd.readAsDataURL(file);
+    }
+    function hapusLogoSekolah() { profilLogoBaru = ''; const f = document.getElementById('pf-logo-file'); if (f) f.value = ''; renderPratinjauKop(); }
+    function simpanProfilSekolah(e) {
+        e.preventDefault();
+        const v = id => (document.getElementById(id)?.value || '').trim();
+        const c = db.config;
+        c.userSchool = v('pf-sekolah'); c.schoolNPSN = v('pf-npsn'); c.schoolAddress = v('pf-alamat'); c.schoolCity = v('pf-kota');
+        c.schoolContact = v('pf-kontak'); c.kopBaris1 = v('pf-kop1'); c.kopBaris2 = v('pf-kop2');
+        c.headmasterName = v('pf-kepsek'); c.headmasterNIP = v('pf-kepsek-nip'); c.userName = v('pf-guru'); c.userNIP = v('pf-guru-nip');
+        if (profilLogoBaru !== null) { c.schoolLogo = profilLogoBaru; profilLogoBaru = null; }
+        syncDB(); updateProfileUI(); renderStatusProfil();
+        Swal.fire({ icon: 'success', title: 'Profil Tersimpan', text: 'Rapor dan semua dokumen unduhan kini memakai data ini.', timer: 1800, showConfirmButton: false });
+    }
+
+    // ---------- Kop & tanda tangan untuk PDF (jsPDF, satuan mm) ----------
+    function pdfKop(doc, judul, subjudul) {
+        const p = profilSekolah(), W = doc.internal.pageSize.getWidth(), cx = W / 2;
+        let y = 13;
+        const tulis = (t, size, bold, warna) => { doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...(warna || [23, 43, 77])); doc.text(t, cx, y, { align: 'center' }); y += size * 0.45 + 1.4; };
+        const yAwal = y;
+        if (p.kop1) tulis(p.kop1.toUpperCase(), 10.5, true, [31, 41, 55]);
+        if (p.kop2) tulis(p.kop2.toUpperCase(), 10.5, true, [31, 41, 55]);
+        tulis((p.sekolah || 'NAMA SEKOLAH').toUpperCase(), 14, true);
+        const alamat = [p.alamat, p.npsn ? 'NPSN ' + p.npsn : ''].filter(Boolean).join('  ·  ');
+        if (alamat) tulis(alamat, 8.5, false, [94, 108, 132]);
+        if (p.kontak) tulis(p.kontak, 8.5, false, [94, 108, 132]);
+        if (p.logo) {
+            try { const s = Math.min(24, Math.max(16, y - yAwal + 2)); doc.addImage(p.logo, /^data:image\/png/.test(p.logo) ? 'PNG' : 'JPEG', 15, yAwal - 5, s, s); } catch (e) { console.warn('Logo PDF', e); }
+        }
+        y = Math.max(y, p.logo ? yAwal + 19 : y);
+        doc.setDrawColor(23, 43, 77); doc.setLineWidth(0.7); doc.line(15, y, W - 15, y);
+        doc.setLineWidth(0.2); doc.line(15, y + 1, W - 15, y + 1);
+        y += 7.5;
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(23, 43, 77); doc.text(judul, cx, y, { align: 'center' }); y += 5.5;
+        if (subjudul) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(31, 41, 55); doc.text(subjudul, cx, y, { align: 'center' }); y += 5; }
+        return y + 2;
+    }
+    // Identitas dua kolom: kiri/kanan = [[label, nilai], ...]
+    function pdfIdentitas(doc, y, kiri, kanan) {
+        const W = doc.internal.pageSize.getWidth(), xR = W / 2 + 25;
+        doc.setFontSize(9); doc.setTextColor(31, 41, 55);
+        const n = Math.max(kiri.length, kanan.length);
+        for (let i = 0; i < n; i++) {
+            const yy = y + i * 5;
+            if (kiri[i]) { doc.setFont('helvetica', 'bold'); doc.text(kiri[i][0], 15, yy); doc.setFont('helvetica', 'normal'); doc.text(': ' + (kiri[i][1] || '-'), 48, yy); }
+            if (kanan[i]) { doc.setFont('helvetica', 'bold'); doc.text(kanan[i][0], xR, yy); doc.setFont('helvetica', 'normal'); doc.text(': ' + (kanan[i][1] || '-'), xR + 33, yy); }
+        }
+        return y + n * 5 + 2;
+    }
+    function pdfTtd(doc, y, jabatanKanan) {
+        const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), t = ttdTeks(jabatanKanan);
+        if (y + 40 > H - 14) { doc.addPage(); y = 20; }
+        const xL = W * 0.25, xR = W * 0.75;
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(31, 41, 55);
+        doc.text('Mengetahui,', xL, y, { align: 'center' }); doc.text(t.tempatTanggal, xR, y, { align: 'center' });
+        doc.text(t.jabatanKiri, xL, y + 4.8, { align: 'center' }); doc.text(t.jabatanKanan, xR, y + 4.8, { align: 'center' });
+        doc.setFont('helvetica', 'bold');
+        doc.text(t.namaKiri, xL, y + 26, { align: 'center' }); doc.text(t.namaKanan, xR, y + 26, { align: 'center' });
+        const garis = (x, s) => { const w = doc.getTextWidth(s); doc.setLineWidth(0.2); doc.line(x - w / 2, y + 26.8, x + w / 2, y + 26.8); };
+        if (profilSekolah().kepsek) garis(xL, t.namaKiri); if (profilSekolah().guru) garis(xR, t.namaKanan);
+        doc.setFont('helvetica', 'normal');
+        doc.text(t.nipKiri, xL, y + 31, { align: 'center' }); doc.text(t.nipKanan, xR, y + 31, { align: 'center' });
+        return y + 35;
+    }
+    function pdfNomorHalaman(doc) {
+        const n = doc.internal.getNumberOfPages(), W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+        for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(120, 130, 145); doc.text(`Halaman ${i} dari ${n}`, W / 2, H - 7, { align: 'center' }); }
+    }
+    // Gaya tabel PDF seragam (cetak hemat tinta, bergaris jelas)
+    const PDF_TABEL = {
+        theme: 'grid',
+        headStyles: { fillColor: [220, 230, 242], textColor: [23, 43, 77], fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: 8.5, lineColor: [107, 119, 133], lineWidth: 0.2 },
+        bodyStyles: { fontSize: 8.3, textColor: [31, 41, 55], valign: 'middle', lineColor: [107, 119, 133], lineWidth: 0.2, cellPadding: 1.8 },
+        alternateRowStyles: { fillColor: [247, 249, 252] }
+    };
+
+    // ---------- Kop & tanda tangan untuk Word (HTML) ----------
+    function wordKop(judul, subjudul) {
+        const p = profilSekolah(), e = escapeHtml;
+        const alamat = [p.alamat, p.npsn ? 'NPSN ' + p.npsn : ''].filter(Boolean).join(' · ');
+        return `<table width="100%" style="border-collapse:collapse;border-bottom:3px double #172B4D;font-family:Arial,sans-serif"><tr><td style="text-align:center;padding-bottom:6px">
+            ${p.kop1 ? `<div style="font-size:11pt;font-weight:bold">${e(p.kop1.toUpperCase())}</div>` : ''}
+            ${p.kop2 ? `<div style="font-size:11pt;font-weight:bold">${e(p.kop2.toUpperCase())}</div>` : ''}
+            <div style="font-size:15pt;font-weight:bold;color:#172B4D">${e((p.sekolah || 'NAMA SEKOLAH').toUpperCase())}</div>
+            ${alamat ? `<div style="font-size:9pt;color:#5E6C84">${e(alamat)}</div>` : ''}${p.kontak ? `<div style="font-size:9pt;color:#5E6C84">${e(p.kontak)}</div>` : ''}
+            </td></tr></table>
+            <p style="text-align:center;font-family:Arial,sans-serif;font-size:13pt;font-weight:bold;color:#172B4D;margin:12px 0 2px">${e(judul)}</p>
+            ${subjudul ? `<p style="text-align:center;font-family:Arial,sans-serif;font-size:10pt;margin:0 0 8px">${e(subjudul)}</p>` : ''}`;
+    }
+    function wordIdentitas(kiri, kanan) {
+        const e = escapeHtml, n = Math.max(kiri.length, kanan.length); let h = '';
+        for (let i = 0; i < n; i++) {
+            const a = kiri[i], b = kanan[i];
+            h += `<tr><td style="width:18%;font-weight:bold">${a ? e(a[0]) : ''}</td><td style="width:32%">${a ? ': ' + e(a[1] || '-') : ''}</td><td style="width:18%;font-weight:bold">${b ? e(b[0]) : ''}</td><td style="width:32%">${b ? ': ' + e(b[1] || '-') : ''}</td></tr>`;
+        }
+        return `<table width="100%" style="font-family:Arial,sans-serif;font-size:10pt;margin-bottom:8px">${h}</table>`;
+    }
+    function wordTtd(jabatanKanan) {
+        const t = ttdTeks(jabatanKanan), e = escapeHtml;
+        return `<br><table width="100%" style="font-family:Arial,sans-serif;font-size:10pt;text-align:center"><tr>
+            <td width="50%">Mengetahui,<br>${e(t.jabatanKiri)}<br><br><br><br><b><u>${e(t.namaKiri)}</u></b><br>${e(t.nipKiri)}</td>
+            <td width="50%">${e(t.tempatTanggal)}<br>${e(t.jabatanKanan)}<br><br><br><br><b><u>${e(t.namaKanan)}</u></b><br>${e(t.nipKanan)}</td></tr></table>`;
+    }
+    // Tahun pelajaran & semester dokumen: mengikuti pilihan TP di atas layar, semester dari bulan berjalan
+    function infoTapelDokumen() {
+        const tapel = getActiveTapel(), m = new Date().getMonth() + 1;
+        const sem = tapel === getDefaultTapel() ? (m >= 7 ? 'ganjil' : 'genap') : 'ganjil';
+        return { tapel, sem, semLabel: exSemLabel(sem) };
+    }
+
+    // =====================================================================
     // EKSPOR EXCEL FORMAT SEKOLAH (kop, identitas, tabel bergaris, tanda tangan, siap cetak A4)
     // Memakai ExcelJS (dimuat saat dibutuhkan). Jika gagal dimuat, dipakai format sederhana di atas.
     // =====================================================================
@@ -2221,18 +2438,40 @@ window.AGENDA_GURU_LOADED = true;
     }
     const EX_HEAD = { b: true, align: 'center', wrap: true, fill: EXW.kepala, border: true, size: 9 };
 
-    // Kop: judul, nama sekolah, alamat + garis. Mengembalikan baris berikutnya yang kosong.
-    function exKop(ws, judul, lastCol) {
-        const c = db.config || {};
-        exGabung(ws, 1, 1, 1, lastCol, judul, { b: true, size: 14, align: 'center', color: EXW.judul });
-        exGabung(ws, 2, 1, 2, lastCol, String(c.userSchool || 'Nama Sekolah').toUpperCase(), { b: true, size: 12, align: 'center' });
-        exGabung(ws, 3, 1, 3, lastCol, c.schoolAddress || '', { size: 9, i: true, align: 'center', color: EXW.abu });
-        ws.getRow(1).height = 22; ws.getRow(2).height = 18;
-        for (let col = 1; col <= lastCol; col++) ws.getCell(3, col).border = { bottom: { style: 'medium', color: { argb: EXW.judul } } };
-        return 5;
+    // Kop sekolah (dari menu Profil Sekolah & Guru) + judul dokumen. Mengembalikan baris berikutnya yang kosong.
+    function exKop(ws, judul, lastCol, subjudul) {
+        const p = profilSekolah();
+        const baris = [];
+        if (p.kop1) baris.push([p.kop1.toUpperCase(), { b: true, size: 11 }]);
+        if (p.kop2) baris.push([p.kop2.toUpperCase(), { b: true, size: 11 }]);
+        baris.push([(p.sekolah || 'NAMA SEKOLAH').toUpperCase(), { b: true, size: 14 }]);
+        const alamat = [p.alamat, p.npsn ? 'NPSN ' + p.npsn : ''].filter(Boolean).join(' · ');
+        if (alamat) baris.push([alamat, { size: 9, color: EXW.abu }]);
+        if (p.kontak) baris.push([p.kontak, { size: 9, color: EXW.abu }]);
+        if (baris.length < 3) baris.push(['', {}]); // ruang untuk logo
+        let r = 1;
+        baris.forEach(([t, st]) => { exGabung(ws, r, 1, r, lastCol, t, Object.assign({ align: 'center' }, st)); ws.getRow(r).height = st.size >= 14 ? 21 : 15; r++; });
+        for (let col = 1; col <= lastCol; col++) ws.getCell(r - 1, col).border = { bottom: { style: 'medium', color: { argb: EXW.judul } } };
+        if (p.logo) {
+            try {
+                const ext = /^data:image\/png/.test(p.logo) ? 'png' : 'jpeg';
+                const id = ws.workbook.addImage({ base64: p.logo, extension: ext });
+                const tinggi = Math.min(70, baris.reduce((a, [, st]) => a + (st.size >= 14 ? 28 : 20), 0) - 6);
+                ws.addImage(id, { tl: { col: 0.15, row: 0.15 }, ext: { width: tinggi, height: tinggi } });
+            } catch (e) { console.warn('Logo tidak dapat dipasang di Excel', e); }
+        }
+        r++;
+        exGabung(ws, r, 1, r, lastCol, judul, { b: true, size: 13, align: 'center', color: EXW.judul }); ws.getRow(r).height = 20; r++;
+        if (subjudul) { exGabung(ws, r, 1, r, lastCol, subjudul, { size: 10, align: 'center' }); r++; }
+        return r + 1;
     }
     // Identitas dua sisi: kiri & kanan = [[label, nilai], ...]
     function exIdentitas(ws, row, kiri, kanan, lastCol) {
+        if (lastCol < 9) { // tabel sempit: identitas ditulis bersusun (label | nilai)
+            const semua = kiri.concat(kanan);
+            semua.forEach((it, i) => { exGabung(ws, row + i, 1, row + i, 2, it[0], { b: true }); exGabung(ws, row + i, 3, row + i, lastCol, ': ' + (it[1] || '-'), {}); });
+            return row + semua.length + 1;
+        }
         const R = Math.max(5, lastCol - 8);
         const n = Math.max(kiri.length, kanan.length);
         for (let i = 0; i < n; i++) {
@@ -2244,22 +2483,57 @@ window.AGENDA_GURU_LOADED = true;
     }
     // Tanda tangan: kiri Kepala Sekolah, kanan guru/wali kelas
     function exTtd(ws, row, lastCol, jabatanKanan) {
-        const c = db.config || {};
+        const p = profilSekolah(), t = ttdTeks(jabatanKanan);
         const R = Math.max(5, lastCol - 8);
         const kiri = (r, v, st) => exGabung(ws, r, 2, r, 4, v, Object.assign({ align: 'center' }, st || {}));
         const kanan = (r, v, st) => exGabung(ws, r, R, r, lastCol, v, Object.assign({ align: 'center' }, st || {}));
-        const tgl = (c.schoolCity ? c.schoolCity + ', ' : '') + exTglPanjang(new Date());
-        kiri(row, 'Mengetahui,'); kanan(row, tgl);
-        kiri(row + 1, 'Kepala ' + (c.userSchool || 'Sekolah')); kanan(row + 1, jabatanKanan + ',');
-        kiri(row + 5, c.headmasterName || '(.....................................)', { b: true, u: true });
-        kanan(row + 5, c.userName || '(.....................................)', { b: true, u: true });
-        kiri(row + 6, 'NIP. ' + (c.headmasterNIP || '.................................'));
-        kanan(row + 6, 'NIP. ' + (c.userNIP || '.................................'));
+        kiri(row, 'Mengetahui,'); kanan(row, t.tempatTanggal);
+        kiri(row + 1, t.jabatanKiri); kanan(row + 1, t.jabatanKanan);
+        kiri(row + 5, t.namaKiri, { b: true, u: true });
+        kanan(row + 5, t.namaKanan, { b: true, u: true });
+        kiri(row + 6, t.nipKiri); kanan(row + 6, t.nipKanan);
         return row + 7;
+    }
+
+    // Tabel umum bergaris: kolom = [{ judul, lebar, align, wrap, fmt }]; baris = array nilai (atau { v, st })
+    function exTabel(ws, r, kolom, baris, opt) {
+        opt = opt || {};
+        kolom.forEach((k, j) => { if (k.lebar) ws.getColumn(j + 1).width = k.lebar; exSel(ws, r, j + 1, k.judul, EX_HEAD); });
+        ws.getRow(r).height = opt.tinggiJudul || 30;
+        const h = r;
+        baris.forEach((row, i) => {
+            const rr = r + 1 + i, zebra = i % 2 === 1;
+            row.forEach((cel, j) => {
+                const k = kolom[j] || {};
+                const isObj = cel && typeof cel === 'object' && !Array.isArray(cel) && ('v' in cel);
+                const v = isObj ? cel.v : cel;
+                exSel(ws, rr, j + 1, v === null || v === undefined ? '' : v, Object.assign({ border: true, size: 9, align: k.align || 'left', wrap: !!k.wrap, valign: k.wrap ? 'top' : 'middle', fmt: k.fmt, fill: zebra ? EXW.zebra : undefined }, isObj ? cel.st : {}));
+            });
+        });
+        return { kepala: h, akhir: r + baris.length };
+    }
+    // Baris total di bawah tabel: label digabung dari kolom 1 s.d. labelSampai
+    function exBarisTotal(ws, r, lastCol, labelSampai, label, nilai) {
+        exGabung(ws, r, 1, r, labelSampai, label, { b: true, align: 'right', border: true, fill: EXW.kepala, size: 9 });
+        for (let c = labelSampai + 1; c <= lastCol; c++) exSel(ws, r, c, nilai[c - labelSampai - 1] ?? '', { b: true, align: 'center', border: true, fill: EXW.kepala, size: 9 });
+    }
+    // Satu lembar dokumen lengkap: kop, identitas, tabel, catatan, tanda tangan, pengaturan cetak
+    function exLembarDokumen(wb, o) {
+        const lastCol = o.kolom.length;
+        const ws = wb.addWorksheet(o.nama, { properties: { tabColor: { argb: o.warnaTab || 'FF159A9C' } } });
+        let r = exKop(ws, o.judul, lastCol, o.subjudul);
+        if (o.kiri || o.kanan) r = exIdentitas(ws, r, o.kiri || [], o.kanan || [], lastCol);
+        const t = exTabel(ws, r, o.kolom, o.baris, o);
+        r = t.akhir + 1;
+        (o.total || []).forEach(tot => { exBarisTotal(ws, r, lastCol, tot.sampai, tot.label, tot.nilai); r++; });
+        (o.catatan || []).forEach(c => { exGabung(ws, r, 1, r, lastCol, c, { size: 8, i: true, color: EXW.abu, wrap: true }); r++; });
+        if (o.jabatan !== false) exTtd(ws, r + 1, lastCol, o.jabatan || 'Guru');
+        exHalaman(ws, lastCol, t.kepala, t.kepala, o.xSplit);
+        return ws;
     }
     // Pengaturan cetak A4: pilih tegak/mendatar otomatis; jika masih terbaca jelas, muat dalam 1 halaman
     // (agar tanda tangan tidak terpisah). Jika terlalu panjang, lebar 1 halaman dan judul tabel diulang.
-    function exHalaman(ws, lastCol, hRow1, hRow2) {
+    function exHalaman(ws, lastCol, hRow1, hRow2, xSplit) {
         let W = 0, H = 0;
         for (let c = 1; c <= lastCol; c++) W += (ws.getColumn(c).width || 9) * 5.6;
         for (let r = 1; r <= ws.rowCount; r++) H += ws.getRow(r).height || 15;
@@ -2273,7 +2547,7 @@ window.AGENDA_GURU_LOADED = true;
         };
         if (!ws.pageSetup.printTitlesRow) delete ws.pageSetup.printTitlesRow;
         ws.headerFooter = { oddFooter: '&C&8Halaman &P dari &N' };
-        ws.views = [{ state: 'frozen', xSplit: 4, ySplit: hRow2, showGridLines: false }];
+        ws.views = [{ state: 'frozen', xSplit: xSplit === undefined ? 4 : xSplit, ySplit: hRow2, showGridLines: false }];
     }
     function exKolomDasar(ws) {
         ws.getColumn(1).width = 5; ws.getColumn(2).width = 13; ws.getColumn(3).width = 32; ws.getColumn(4).width = 5;
@@ -2570,42 +2844,387 @@ window.AGENDA_GURU_LOADED = true;
         }
     }
 
+
     async function downloadNilaiPDF() {
-        saveNilai(true); const cid = document.getElementById('nilai-kelas').value; const mapel = document.getElementById('nilai-mapel').value;
+        saveNilai(true);
+        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value;
         if (!cid || !mapel) return Swal.fire('Error', 'Pilih kelas & mapel', 'error');
-        await ensurePDF();
-        const className = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid;
-        let rekapSemester = {}; db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => rekapSemester[s.StudentID] = { Name: s.StudentName, SumFormatif: 0, CountFormatif: 0 });
-
-        ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].forEach(m => {
-            const record = db.grades.find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === 'Formatif' && String(g.MonthYear) === String(m) && matchTapel(g, getActiveTapel()));
-            if (record) {
-                let sG = {}; try { sG = JSON.parse(record.GradesData); } catch (e) { }
-                db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => {
-                    let grades = sG[s.StudentID] || [];
-                    for (let i = 0; i < grades.length; i++) {
-                        if (grades[i] !== "" && !isNaN(parseFloat(grades[i]))) {
-                            rekapSemester[s.StudentID].SumFormatif += parseFloat(grades[i]); rekapSemester[s.StudentID].CountFormatif++;
-                        }
-                    }
-                });
-            }
-        });
-
         const bulanVal = document.getElementById('nilai-bulan')?.value || '07';
-        const activeSem = ['07', '08', '09', '10', '11', '12'].includes(String(bulanVal)) ? 'ganjil' : 'genap';
-        const recSLM = db.grades.slice().reverse().find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === 'SumatifLM' && isGradeMatchingSemester(g, activeSem) && matchTapel(g, getActiveTapel())); let slmD = {}; if (recSLM) try { slmD = JSON.parse(recSLM.GradesData); } catch (e) { }
-        const recSAS = db.grades.slice().reverse().find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === 'SumatifAS' && isGradeMatchingSemester(g, activeSem) && matchTapel(g, getActiveTapel())); let sasD = {}; if (recSAS) try { sasD = JSON.parse(recSAS.GradesData); } catch (e) { }
+        const sem = ['07', '08', '09', '10', '11', '12'].includes(String(bulanVal)) ? 'ganjil' : 'genap';
+        const tapel = getActiveTapel(), c = db.config || {};
+        const kelas = db.classes.find(x => String(x.ClassID) === String(cid))?.ClassName || cid;
+        const stds = db.students.filter(s => String(s.ClassID) === String(cid));
+        const olahRec = findNilaiOlahan(cid, mapel, sem, tapel);
+        let kktp = parseFloat(document.getElementById('input-kkm')?.value) || 75;
+        if (olahRec) { try { const st = JSON.parse(olahRec.Pengaturan || '{}'); if (exNum(st.kkm) !== null) kktp = exNum(st.kkm); } catch (e) { } }
+        Swal.fire({ title: 'Membuat PDF...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            await ensurePDF();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            let y = pdfKop(doc, 'REKAP NILAI PESERTA DIDIK');
+            y = pdfIdentitas(doc, y, [['Mata Pelajaran', mapel], ['Kelas', kelas], ['Fase', c.raporFase || '-']], [['Semester', exSemLabel(sem)], ['Tahun Pelajaran', tapel], ['KKTP', String(kktp)]]);
+            const f = v => v === null || v === undefined ? '-' : String(Math.round(v * 10) / 10).replace('.', ',');
+            let tuntas = 0;
+            const body = stds.map((s, i) => {
+                const k = getNilaiKomponen(cid, s.StudentID, mapel, sem, tapel);
+                const nr = exNilaiRapor(cid, s.StudentID, mapel, sem, tapel);
+                if (nr !== null && nr >= kktp) tuntas++;
+                return [i + 1, s.NIS || '', s.StudentName, s.JenisKelamin || '', f(k.harian), f(k.pts), f(k.pas), f(nr), nr === null ? '-' : (nr >= kktp ? 'Tuntas' : 'Belum Tuntas')];
+            });
+            doc.autoTable(Object.assign({}, PDF_TABEL, {
+                head: [['No', 'NIS', 'Nama Peserta Didik', 'L/P', 'Rata-rata PH', 'PTS', 'PAS', 'Nilai Rapor', 'Ketuntasan']],
+                body, startY: y, margin: { left: 15, right: 15, bottom: 16 },
+                columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 18, halign: 'center' }, 2: { cellWidth: 52 }, 3: { cellWidth: 9, halign: 'center' }, 4: { halign: 'center' }, 5: { halign: 'center' }, 6: { halign: 'center' }, 7: { halign: 'center', fontStyle: 'bold' }, 8: { halign: 'center', cellWidth: 23 } },
+                didParseCell: d => {
+                    if (d.section !== 'body') return;
+                    if (d.column.index === 8) d.cell.styles.textColor = d.cell.raw === 'Tuntas' ? [30, 125, 79] : d.cell.raw === 'Belum Tuntas' ? [192, 57, 43] : [31, 41, 55];
+                    if (d.column.index >= 4 && d.column.index <= 7) { const n = parseFloat(String(d.cell.raw).replace(',', '.')); if (!isNaN(n) && n < kktp) d.cell.styles.textColor = [192, 57, 43]; }
+                }
+            }));
+            y = doc.lastAutoTable.finalY + 5;
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(31, 41, 55);
+            doc.text(`Jumlah tuntas: ${tuntas} dari ${stds.length} peserta didik. Nilai berwarna merah berada di bawah KKTP (${kktp}).`, 15, y);
+            doc.setFont('helvetica', 'italic'); doc.setTextColor(94, 108, 132);
+            doc.text(olahRec ? 'Nilai Rapor dari menu Pengolah Nilai, sama dengan yang tercetak di rapor.' : 'Nilai Rapor = rata-rata dari Rata-rata PH, PTS, dan PAS yang terisi (sama dengan rapor).', 15, y + 4.5);
+            pdfTtd(doc, y + 14, 'Guru Mata Pelajaran');
+            pdfNomorHalaman(doc);
+            doc.save(exNamaFile(`Rekap Nilai ${mapel} ${kelas} - Semester ${sem === 'ganjil' ? 'Ganjil' : 'Genap'} ${tapel.replace('/', '-')}.pdf`));
+            Swal.fire({ icon: 'success', title: 'PDF siap', timer: 1500, showConfirmButton: false });
+        } catch (err) {
+            console.error(err); Swal.fire('Error', 'Gagal membuat PDF: ' + (err.message || err), 'error');
+        }
+    }
 
-        const { jsPDF } = window.jspdf; const doc = new jsPDF();
-        doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.text(`Rekapitulasi Nilai - ${mapel}`, 14, 16); doc.setFontSize(11); doc.setFont("helvetica", "normal"); doc.text(`Kelas: ${className}`, 14, 22);
-        const tableData = db.students.filter(s => String(s.ClassID) === String(cid)).map(s => {
-            let r = rekapSemester[s.StudentID], avg = r.CountFormatif > 0 ? (r.SumFormatif / r.CountFormatif) : 0;
-            let slm = parseFloat(slmD[s.StudentID]?.[0] || 0), sas = parseFloat(sasD[s.StudentID]?.[0] || 0);
-            return [s.StudentName, avg.toFixed(1), slm.toFixed(1), sas.toFixed(1), ((avg + slm + sas) / 3).toFixed(1)];
+    async function downloadKokuPDF() {
+        const data = getKokuExportData();
+        if (!data) return;
+        const { records, className, filterId, fileSuffix } = data;
+        Swal.fire({ title: 'Membuat Dokumen PDF...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            await ensurePDF();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const info = infoTapelDokumen();
+            let y = pdfKop(doc, 'REKAPITULASI PENILAIAN KOKURIKULER');
+            y = pdfIdentitas(doc, y, [['Kelas', className], ['Guru / Fasilitator', profilSekolah().guru]], [['Semester', info.semLabel], ['Tahun Pelajaran', info.tapel]]);
+            if (filterId && records.length === 1) {
+                const rec = records[0]; let dims = []; try { dims = JSON.parse(rec.Dimensi || '[]'); } catch (e) { }
+                y = pdfIdentitas(doc, y, [['Nama Projek', `${rec.Projek || '-'} (${rec.Jenis === '7KAIH' ? '7KAIH' : 'Lintas Mata Pelajaran'})`]], [['Tanggal', formatTanggalIndo(rec.Tanggal)], ['Dimensi', dims.join(', ') || '-']]);
+            }
+            const body = []; let no = 1;
+            records.forEach(k => {
+                let kd = {}; try { kd = JSON.parse(k.KokuData || '{}'); } catch (e) { }
+                Object.keys(kd).forEach(sid => {
+                    const s = db.students.find(x => String(x.StudentID) === String(sid));
+                    body.push([no++, s ? (s.NIS || '') : '', s ? s.StudentName : sid, k.Projek || '-', kd[sid].Kategori || '-', String(kd[sid].Narasi || '').replace(/<[^>]+>/g, '').trim()]);
+                });
+            });
+            doc.autoTable(Object.assign({}, PDF_TABEL, {
+                head: [['No', 'NIS', 'Nama Peserta Didik', 'Projek', 'Capaian', 'Deskripsi Capaian Profil']],
+                body, startY: y, margin: { left: 15, right: 15, bottom: 16 },
+                columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 18, halign: 'center' }, 2: { cellWidth: 46 }, 3: { cellWidth: 40 }, 4: { cellWidth: 24, halign: 'center', fontStyle: 'bold' }, 5: { cellWidth: 129 } }
+            }));
+            pdfTtd(doc, doc.lastAutoTable.finalY + 10, 'Guru / Fasilitator Projek');
+            pdfNomorHalaman(doc);
+            doc.save(exNamaFile(`Rekap Kokurikuler ${className}${fileSuffix}.pdf`));
+            Swal.fire({ icon: 'success', title: 'PDF siap', timer: 1500, showConfirmButton: false });
+        } catch (err) {
+            console.error('Error saat membuat PDF kokurikuler:', err);
+            Swal.fire('Error', 'Gagal memproses dokumen PDF: ' + (err.message || err), 'error');
+        }
+    }
+
+    // Export ke Word (.doc) memakai HTML-sebagai-dokumen-Word, lengkap dengan kop & tanda tangan
+    function downloadKokuWord() {
+        const data = getKokuExportData();
+        if (!data) return;
+        const { records, className, fileSuffix } = data;
+        const info = infoTapelDokumen(), e = escapeHtml;
+        let isi = wordKop('REKAPITULASI PENILAIAN KOKURIKULER') +
+            wordIdentitas([['Kelas', className], ['Guru / Fasilitator', profilSekolah().guru]], [['Semester', info.semLabel], ['Tahun Pelajaran', info.tapel]]);
+        const th = 'style="background:#DCE6F2;color:#172B4D;border:1px solid #6B7785;padding:5px;font-size:9.5pt"';
+        const td = 'style="border:1px solid #6B7785;padding:5px;font-size:9.5pt;vertical-align:top"';
+        records.forEach(k => {
+            let kd = {}; try { kd = JSON.parse(k.KokuData || '{}'); } catch (err) { }
+            let dims = []; try { dims = JSON.parse(k.Dimensi || '[]'); } catch (err) { }
+            isi += `<p style="font-family:Arial,sans-serif;font-size:10.5pt;margin:12px 0 4px"><b>Projek: ${e(k.Projek || '-')}</b>${k.Tanggal ? ' &nbsp;·&nbsp; ' + e(formatTanggalIndo(k.Tanggal)) : ''}${dims.length ? ' &nbsp;·&nbsp; Dimensi: ' + e(dims.join(', ')) : ''}</p>`;
+            if (k.Deskripsi) isi += `<p style="font-family:Arial,sans-serif;font-size:9.5pt;margin:0 0 6px"><i>${e(k.Deskripsi)}</i></p>`;
+            isi += `<table width="100%" style="border-collapse:collapse;font-family:Arial,sans-serif"><tr><th ${th} width="5%">No</th><th ${th} width="12%">NIS</th><th ${th} width="23%">Nama Peserta Didik</th><th ${th} width="13%">Capaian</th><th ${th}>Deskripsi Capaian Profil</th></tr>`;
+            Object.keys(kd).forEach((sid, i) => {
+                const s = db.students.find(x => String(x.StudentID) === String(sid));
+                isi += `<tr><td ${td} align="center">${i + 1}</td><td ${td} align="center">${e(s ? s.NIS || '' : '')}</td><td ${td}>${e(s ? s.StudentName : sid)}</td><td ${td} align="center"><b>${e(kd[sid].Kategori || '-')}</b></td><td ${td}>${e(String(kd[sid].Narasi || '').replace(/<[^>]+>/g, ''))}</td></tr>`;
+            });
+            isi += '</table>';
         });
-        doc.autoTable({ head: [['Nama Siswa', 'Rata PH', 'PTS', 'PAS', 'Nilai Rapor']], body: tableData, startY: 28, headStyles: { fillColor: [23, 43, 77] } });
-        doc.save(`Rekap_${mapel}.pdf`);
+        isi += wordTtd('Guru / Fasilitator Projek');
+        const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+            <head><meta charset="utf-8"><title>Rekap Kokurikuler</title>
+            <style>@page Section1 { size: 21cm 29.7cm; margin: 2cm 2cm 2cm 2cm; } div.Section1 { page: Section1; } body { font-family: Arial, sans-serif; }</style></head>
+            <body><div class="Section1">${isi}</div></body></html>`;
+        const blob = new Blob(['﻿', htmlDoc], { type: 'application/msword' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = exNamaFile(`Rekap Kokurikuler ${className}${fileSuffix}.doc`);
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+    }
+
+    async function downloadJurnalPDF() {
+        const cFilter = document.getElementById('filter-jurnal-kelas').value;
+        if (!cFilter) return Swal.fire('Peringatan', 'Silakan pilih kelas terlebih dahulu sebelum mengunduh PDF!', 'warning');
+        let filtered = db.journal.filter(j => cFilter === 'All' || String(j.ClassID) === String(cFilter) || j.ClassID === 'All');
+        if (filtered.length === 0) return Swal.fire('Informasi', 'Belum ada catatan jurnal pada kelas yang dipilih.', 'info');
+        filtered.sort((a, b) => (a.Date > b.Date ? 1 : -1));
+        const className = cFilter === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(cFilter))?.ClassName || cFilter);
+        Swal.fire({ title: 'Membuat Dokumen PDF...', text: 'Menyusun jurnal & memuat foto dokumentasi...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            await ensurePDF();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const info = infoTapelDokumen();
+            const awal = filtered[0].Date, akhir = filtered[filtered.length - 1].Date;
+            let y = pdfKop(doc, 'JURNAL KEGIATAN PEMBELAJARAN', awal ? `Periode ${exTglIso(awal)} s.d. ${exTglIso(akhir)}` : '');
+            y = pdfIdentitas(doc, y, [['Kelas', className], ['Guru', profilSekolah().guru]], [['Semester', info.semLabel], ['Tahun Pelajaran', info.tapel]]);
+            const rows = [];
+            for (let i = 0; i < filtered.length; i++) {
+                const j = filtered[i];
+                let img = j.AttachmentData || '';
+                if (!img && j.AttachmentUrl && j.AttachmentUrl.startsWith('data:image')) img = j.AttachmentUrl;
+                if (!img && j.AttachmentUrl && (j.AttachmentUrl.startsWith('http') || j.AttachmentUrl.startsWith('blob'))) { try { img = await loadImageToDataUrl(j.AttachmentUrl); } catch (e) { img = null; } }
+                const kls = j.ClassID === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(j.ClassID))?.ClassName || j.ClassID);
+                const lampiran = !img && j.AttachmentUrl && j.AttachmentUrl !== 'https://simulasi-url-drive.com/file';
+                rows.push({ img, sel: [String(i + 1), formatTanggalIndo(j.Date), kls, j.Subject || '-', j.Content || '-', img ? '' : (lampiran ? 'Lampiran file' : '-')] });
+            }
+            doc.autoTable(Object.assign({}, PDF_TABEL, {
+                head: [['No', 'Hari / Tanggal', 'Kelas', 'Mata Pelajaran', 'Uraian Kegiatan Pembelajaran', 'Dokumentasi']],
+                body: rows.map(r => r.sel), startY: y, margin: { left: 15, right: 15, bottom: 16 },
+                columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 40, halign: 'center' }, 2: { cellWidth: 20, halign: 'center' }, 3: { cellWidth: 34 }, 4: { cellWidth: 113 }, 5: { cellWidth: 50, halign: 'center' } },
+                didParseCell: d => { if (d.section === 'body' && d.column.index === 5 && rows[d.row.index]?.img) d.cell.styles.minCellHeight = 30; },
+                didDrawCell: d => {
+                    if (d.section !== 'body' || d.column.index !== 5) return;
+                    const r = rows[d.row.index]; if (!r || !r.img) return;
+                    const w = Math.min(d.cell.width - 4, 44), h = Math.min(d.cell.height - 4, 26);
+                    try { doc.addImage(r.img, 'JPEG', d.cell.x + (d.cell.width - w) / 2, d.cell.y + (d.cell.height - h) / 2, w, h); } catch (e) { console.warn('Foto jurnal gagal dimuat', e); }
+                }
+            }));
+            pdfTtd(doc, doc.lastAutoTable.finalY + 10, cFilter === 'All' ? 'Guru' : 'Guru Kelas / Mata Pelajaran');
+            pdfNomorHalaman(doc);
+            doc.save(exNamaFile(`Jurnal Pembelajaran ${className} - ${info.tapel.replace('/', '-')}.pdf`));
+            Swal.fire({ icon: 'success', title: 'PDF siap', timer: 1500, showConfirmButton: false });
+        } catch (err) {
+            console.error('Error PDF jurnal:', err);
+            Swal.fire('Error', 'Gagal memproses dokumen PDF: ' + (err.message || err), 'error');
+        }
+    }
+
+    // Data poin sesuai filter yang sedang dipakai di layar
+    function dataPoinTerfilter() {
+        const cid = document.getElementById('filter-poin-kelas')?.value || document.getElementById('poin-kelas')?.value;
+        const jenis = document.getElementById('filter-poin-jenis')?.value || 'all';
+        const q = (document.getElementById('search-poin-text')?.value || '').toLowerCase().trim();
+        let records = db.poin.filter(p => cid === 'All' || String(p.ClassID) === String(cid)).slice().sort((a, b) => String(a.Tanggal).localeCompare(String(b.Tanggal)));
+        if (jenis === 'reward') records = records.filter(p => (Number(p.PoinReward) || 0) > 0);
+        else if (jenis === 'pelanggaran') records = records.filter(p => (Number(p.PoinPelanggaran) || 0) > 0);
+        if (q) records = records.filter(p => (db.students.find(s => s.StudentID === p.StudentID)?.StudentName || '').toLowerCase().includes(q) || (p.Keterangan || '').toLowerCase().includes(q));
+        const className = cid === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid);
+        const label = jenis === 'reward' ? 'Reward / Prestasi (+)' : jenis === 'pelanggaran' ? 'Pelanggaran (-)' : 'Semua Kategori';
+        return { cid, records, className, label };
+    }
+    function statusPoin(net) {
+        if (net >= 20) return 'Sangat Teladan';
+        if (net >= 10) return 'Teladan / Berprestasi';
+        if (net >= 0) return 'Baik / Tertib';
+        if (net >= -10) return 'Pembinaan Ringan';
+        if (net >= -25) return 'Bimbingan Konseling';
+        return 'Panggilan Orang Tua';
+    }
+
+    async function downloadPoinPDF() {
+        const { cid, records, className, label } = dataPoinTerfilter();
+        if (!cid) return Swal.fire('Error', 'Silakan pilih kelas terlebih dahulu sebelum mengunduh PDF!', 'error');
+        if (records.length === 0) return Swal.fire('Informasi', 'Belum ada data poin siswa yang cocok untuk diunduh.', 'info');
+        Swal.fire({ title: 'Membuat Dokumen PDF...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            await ensurePDF();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const info = infoTapelDokumen();
+            let y = pdfKop(doc, 'BUKU CATATAN POIN PESERTA DIDIK');
+            y = pdfIdentitas(doc, y, [['Kelas', className], ['Guru / BK', profilSekolah().guru]], [['Semester', info.semLabel], ['Tahun Pelajaran', info.tapel], ['Kategori', label]]);
+            let tR = 0, tP = 0;
+            const body = records.map((p, i) => {
+                const s = db.students.find(x => x.StudentID === p.StudentID);
+                const kls = db.classes.find(c => String(c.ClassID) === String(p.ClassID))?.ClassName || p.ClassID;
+                const r = Number(p.PoinReward) || 0, pl = Number(p.PoinPelanggaran) || 0; tR += r; tP += pl;
+                return [i + 1, formatTanggalIndo(p.Tanggal), s ? s.StudentName : '(siswa tidak ditemukan)', kls, r ? '+' + r : '-', pl ? '-' + pl : '-', (r - pl >= 0 ? '+' : '') + (r - pl), p.Keterangan || '-'];
+            });
+            body.push([{ content: 'JUMLAH', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold', fillColor: [220, 230, 242] } }, { content: '+' + tR, styles: { fontStyle: 'bold', fillColor: [220, 230, 242] } }, { content: '-' + tP, styles: { fontStyle: 'bold', fillColor: [220, 230, 242] } }, { content: (tR - tP >= 0 ? '+' : '') + (tR - tP), styles: { fontStyle: 'bold', fillColor: [220, 230, 242] } }, { content: `${records.length} catatan`, styles: { fillColor: [220, 230, 242] } }]);
+            doc.autoTable(Object.assign({}, PDF_TABEL, {
+                head: [['No', 'Hari / Tanggal', 'Nama Peserta Didik', 'Kelas', 'Reward (+)', 'Pelanggaran (-)', 'Total', 'Keterangan / Tindak Lanjut']],
+                body, startY: y, margin: { left: 15, right: 15, bottom: 16 },
+                columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 36, halign: 'center' }, 2: { cellWidth: 50 }, 3: { cellWidth: 22, halign: 'center' }, 4: { cellWidth: 22, halign: 'center', textColor: [30, 125, 79], fontStyle: 'bold' }, 5: { cellWidth: 25, halign: 'center', textColor: [192, 57, 43], fontStyle: 'bold' }, 6: { cellWidth: 18, halign: 'center', fontStyle: 'bold' }, 7: { cellWidth: 84 } }
+            }));
+            pdfTtd(doc, doc.lastAutoTable.finalY + 10, 'Guru Kelas / Guru BK');
+            pdfNomorHalaman(doc);
+            doc.save(exNamaFile(`Catatan Poin ${className} - ${info.tapel.replace('/', '-')}.pdf`));
+            Swal.fire({ icon: 'success', title: 'PDF siap', timer: 1500, showConfirmButton: false });
+        } catch (err) {
+            console.error('Error PDF poin:', err);
+            Swal.fire('Error', 'Gagal memproses dokumen PDF: ' + (err.message || err), 'error');
+        }
+    }
+
+    // =====================================================================
+    // EKSPOR EXCEL FORMAT SEKOLAH: POIN, PENGOLAH NILAI, REKAP LAPORAN, DESKRIPSI RAPOR
+    // Gagal memuat ExcelJS -> memakai format sederhana (fungsi *Sederhana).
+    // =====================================================================
+    async function exJalankan(teks, kerja, cadangan) {
+        Swal.fire({ title: 'Menyiapkan Excel...', text: teks, allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            await ensureExcelJS();
+            const hasil = await kerja();
+            if (hasil !== false) Swal.fire({ icon: 'success', title: 'Excel siap', text: 'File sudah diunduh.', timer: 1600, showConfirmButton: false });
+        } catch (e) {
+            console.error('Ekspor format sekolah gagal, memakai format sederhana:', e);
+            Swal.close(); if (cadangan) await cadangan();
+        }
+    }
+    const exWb = () => { const wb = new ExcelJS.Workbook(); wb.creator = 'AgendaGuru'; wb.created = new Date(); return wb; };
+    const exAngka = v => v === null || v === undefined || v === '' ? '' : Math.round(Number(v) * 10) / 10;
+
+    async function downloadPoinExcel() {
+        const { cid, records, className, label } = dataPoinTerfilter();
+        if (!cid) return Swal.fire('Error', 'Silakan pilih kelas terlebih dahulu sebelum mengunduh Excel!', 'error');
+        await exJalankan('Rekap & buku catatan poin format sekolah', async () => {
+            const info = infoTapelDokumen(), guru = profilSekolah().guru;
+            let siswa = db.students.filter(s => cid === 'All' || String(s.ClassID) === String(cid));
+            const rek = {}; siswa.forEach(s => rek[s.StudentID] = { r: 0, p: 0 });
+            db.poin.filter(p => cid === 'All' || String(p.ClassID) === String(cid)).forEach(p => { if (rek[p.StudentID]) { rek[p.StudentID].r += Number(p.PoinReward) || 0; rek[p.StudentID].p += Number(p.PoinPelanggaran) || 0; } });
+            const wb = exWb();
+            let sR = 0, sP = 0;
+            const barisRekap = siswa.map((s, i) => {
+                const x = rek[s.StudentID], net = x.r - x.p; sR += x.r; sP += x.p;
+                const kls = db.classes.find(c => String(c.ClassID) === String(s.ClassID))?.ClassName || '';
+                return [i + 1, s.NIS || '', s.StudentName, s.JenisKelamin || '', kls, x.r || '', x.p || '', { v: net, st: { b: true, color: net < 0 ? EXW.merah : undefined } }, { v: statusPoin(net), st: { color: net < 0 ? EXW.merah : undefined } }];
+            });
+            exLembarDokumen(wb, {
+                nama: 'Rekap Poin', judul: 'REKAPITULASI POIN PESERTA DIDIK',
+                kiri: [['Kelas', className], ['Guru / BK', guru]], kanan: [['Semester', info.semLabel], ['Tahun Pelajaran', info.tapel]],
+                kolom: [{ judul: 'No', lebar: 5, align: 'center' }, { judul: 'NIS', lebar: 12, align: 'center' }, { judul: 'Nama Peserta Didik', lebar: 30 }, { judul: 'L/P', lebar: 5, align: 'center' }, { judul: 'Kelas', lebar: 11, align: 'center' },
+                    { judul: 'Total Reward (+)', lebar: 11, align: 'center' }, { judul: 'Total Pelanggaran (-)', lebar: 13, align: 'center' }, { judul: 'Akumulasi Poin', lebar: 11, align: 'center' }, { judul: 'Status Pembinaan', lebar: 22 }],
+                baris: barisRekap,
+                total: [{ sampai: 5, label: 'JUMLAH KELAS', nilai: [sR, sP, sR - sP, siswa.length ? `Rata-rata ${Math.round((sR - sP) / siswa.length * 10) / 10} poin/siswa` : ''] }],
+                catatan: ['Status: Sangat Teladan ≥ 20, Teladan 10–19, Baik 0–9, Pembinaan Ringan −1 s.d. −10, Bimbingan Konseling −11 s.d. −25, Panggilan Orang Tua < −25.'],
+                jabatan: 'Guru Kelas / Guru BK'
+            });
+            let lR = 0, lP = 0;
+            const barisLog = records.map((p, i) => {
+                const s = db.students.find(x => x.StudentID === p.StudentID);
+                const kls = db.classes.find(c => String(c.ClassID) === String(p.ClassID))?.ClassName || p.ClassID;
+                const r = Number(p.PoinReward) || 0, pl = Number(p.PoinPelanggaran) || 0; lR += r; lP += pl;
+                return [i + 1, formatTanggalIndo(p.Tanggal), s ? s.StudentName : '(siswa tidak ditemukan)', kls, r || '', pl || '', { v: r - pl, st: { b: true, color: r - pl < 0 ? EXW.merah : undefined } }, p.Keterangan || '-'];
+            });
+            exLembarDokumen(wb, {
+                nama: 'Buku Catatan Poin', judul: 'BUKU CATATAN POIN PESERTA DIDIK', warnaTab: 'FF172B4D',
+                kiri: [['Kelas', className], ['Guru / BK', guru]], kanan: [['Semester', info.semLabel], ['Tahun Pelajaran', info.tapel], ['Kategori', label]],
+                kolom: [{ judul: 'No', lebar: 5, align: 'center' }, { judul: 'Hari / Tanggal', lebar: 24, align: 'center' }, { judul: 'Nama Peserta Didik', lebar: 28 }, { judul: 'Kelas', lebar: 11, align: 'center' },
+                    { judul: 'Reward (+)', lebar: 10, align: 'center' }, { judul: 'Pelanggaran (-)', lebar: 15, align: 'center' }, { judul: 'Total', lebar: 8, align: 'center' }, { judul: 'Keterangan / Tindak Lanjut', lebar: 40, wrap: true }],
+                baris: barisLog.length ? barisLog : [['', '', 'Belum ada catatan poin.', '', '', '', '', '']],
+                total: [{ sampai: 4, label: 'JUMLAH', nilai: [lR, lP, lR - lP, `${records.length} catatan`] }],
+                jabatan: 'Guru Kelas / Guru BK', xSplit: 3
+            });
+            await exSimpan(wb, `Rekap Poin ${className} - ${info.tapel.replace('/', '-')}.xlsx`);
+        }, downloadPoinExcelSederhana);
+    }
+
+    async function downloadPengolahExcel() {
+        const { cid, subj, sem, tapel } = pnSelection();
+        if (!cid || !subj || pnRows.length === 0) return Swal.fire('Pilih Data', 'Pilih kelas dan mata pelajaran yang memiliki siswa.', 'warning');
+        await exJalankan('Pengolahan nilai format sekolah', async () => {
+            const s = pnReadSettings(), wb = exWb(), c = db.config || {};
+            const baris = pnRows.map((r, i) => {
+                const t = r.akhir === null || r.akhir === undefined ? '' : (r.akhir >= s.kkm ? 'Tuntas' : 'Belum Tuntas');
+                const st = v => ({ v: exAngka(v), st: { color: v !== null && v !== undefined && v < s.kkm ? EXW.merah : undefined } });
+                return [i + 1, r.nis || '', r.name, st(r.harian), st(r.pts), st(r.pas), exAngka(r.hadir), exAngka(r.mentah), { v: r.akhir ?? '', st: { b: true } },
+                    { v: t, st: { b: true, color: t === 'Tuntas' ? EXW.hijau : EXW.merah, fill: t === 'Tuntas' ? EXW.tuntas : t ? EXW.belum : undefined } }];
+            });
+            exLembarDokumen(wb, {
+                nama: 'Pengolahan Nilai', judul: 'PENGOLAHAN NILAI AKHIR',
+                kiri: [['Mata Pelajaran', subj], ['Kelas', pnKelasName(cid)], ['Fase', c.raporFase || '-']],
+                kanan: [['Semester', exSemLabel(sem)], ['Tahun Pelajaran', tapel], ['KKTP', String(s.kkm)]],
+                kolom: [{ judul: 'No', lebar: 5, align: 'center' }, { judul: 'NIS', lebar: 12, align: 'center' }, { judul: 'Nama Peserta Didik', lebar: 30 }, { judul: 'Rata-rata PH', lebar: 9, align: 'center', fmt: '0.0' },
+                    { judul: 'PTS', lebar: 8, align: 'center' }, { judul: 'PAS', lebar: 8, align: 'center' }, { judul: 'Hadir (%)', lebar: 8, align: 'center' }, { judul: 'Nilai Mentah', lebar: 9, align: 'center', fmt: '0.0' },
+                    { judul: 'Nilai Akhir', lebar: 9, align: 'center' }, { judul: 'Ketuntasan', lebar: 13, align: 'center' }],
+                baris,
+                catatan: [`Bobot: PH ${s.bobot.harian}% · PTS ${s.bobot.pts}% · PAS ${s.bobot.pas}% · Kehadiran ${s.bobot.hadir}%.  Penyesuaian: ${pnMetodeText(s)}.`, 'Nilai berwarna merah berada di bawah KKTP. Nilai Akhir yang disimpan menjadi nilai rapor.'],
+                jabatan: 'Guru Mata Pelajaran', xSplit: 3
+            });
+            await exSimpan(wb, `Pengolahan Nilai ${subj} ${pnKelasName(cid)} - Semester ${sem === 'ganjil' ? 'Ganjil' : 'Genap'} ${tapel.replace('/', '-')}.xlsx`);
+        }, downloadPengolahExcelSederhana);
+    }
+
+    async function downloadRekapExcel() {
+        const cid = document.getElementById('rekap-kelas')?.value, sem = document.getElementById('rekap-semester')?.value || 'ganjil', tapel = getActiveTapel();
+        if (!cid) return Swal.fire('Pilih Kelas', 'Pilih kelas yang akan direkap.', 'warning');
+        await exJalankan('Leger & rekap kelas format sekolah', async () => {
+            const { subjects, rows } = buildRekapData(cid, sem, tapel);
+            const kelas = pnKelasName(cid), wb = exWb(), guru = profilSekolah().guru;
+            const kiri = [['Kelas', kelas], ['Wali Kelas', guru]], kanan = [['Semester', exSemLabel(sem)], ['Tahun Pelajaran', tapel]];
+            // Leger
+            exLembarDokumen(wb, {
+                nama: 'Leger Nilai', judul: 'LEGER NILAI AKHIR PESERTA DIDIK', kiri, kanan, tinggiJudul: 48,
+                kolom: [{ judul: 'No', lebar: 5, align: 'center' }, { judul: 'NIS', lebar: 11, align: 'center' }, { judul: 'NISN', lebar: 12, align: 'center' }, { judul: 'Nama Peserta Didik', lebar: 28 },
+                    ...subjects.map(s => ({ judul: s, lebar: Math.max(9, Math.min(15, Math.max(...String(s).split(' ').map(w => w.length)) + 2)), align: 'center' })), { judul: 'Jumlah', lebar: 9, align: 'center' }, { judul: 'Rata-rata', lebar: 9, align: 'center', fmt: '0.00' }, { judul: 'Peringkat', lebar: 9, align: 'center' }],
+                baris: rows.map((r, i) => [i + 1, r.st.NIS || '', r.st.NISN || '', r.st.StudentName, ...subjects.map(s => r.scores[s] ?? ''), r.jumlah ?? '', r.rata ?? '', { v: r.rank || '', st: { b: true } }]),
+                catatan: ['Nilai sama dengan nilai rapor (memakai hasil Pengolah Nilai jika sudah disimpan).'],
+                jabatan: 'Wali Kelas'
+            });
+            // Kehadiran
+            exLembarDokumen(wb, {
+                nama: 'Rekap Kehadiran', judul: 'REKAPITULASI KEHADIRAN PESERTA DIDIK', kiri, kanan, warnaTab: 'FF172B4D',
+                kolom: [{ judul: 'No', lebar: 5, align: 'center' }, { judul: 'NIS', lebar: 12, align: 'center' }, { judul: 'Nama Peserta Didik', lebar: 30 }, { judul: 'L/P', lebar: 5, align: 'center' },
+                    { judul: 'Hadir', lebar: 8, align: 'center' }, { judul: 'Sakit', lebar: 8, align: 'center' }, { judul: 'Izin', lebar: 8, align: 'center' }, { judul: 'Alpa', lebar: 8, align: 'center' }, { judul: '% Hadir', lebar: 9, align: 'center' }],
+                baris: rows.map((r, i) => [i + 1, r.st.NIS || '', r.st.StudentName, r.st.JenisKelamin || '', r.att.H, r.att.S || '', r.att.I || '', { v: r.att.A || '', st: { b: r.att.A >= 3, color: r.att.A >= 3 ? EXW.merah : undefined } }, r.persenHadir === null ? '' : r.persenHadir + '%']),
+                jabatan: 'Wali Kelas'
+            });
+            // Detail pengolahan
+            const recs = (db.nilaiAkhir || []).filter(r => String(r.ClassID) === String(cid) && String(r.Semester || '').toLowerCase() === sem && pnSameTapel(r.TahunPelajaran, tapel));
+            const det = [];
+            recs.forEach(rec => {
+                let s = PN_DEFAULT; try { s = Object.assign({}, PN_DEFAULT, JSON.parse(rec.Pengaturan || '{}')); } catch (e) { }
+                const data = parseNilaiData(rec);
+                rows.forEach((r, i) => {
+                    const d = data[r.st.StudentID] || {};
+                    det.push([rec.Subject, i + 1, r.st.StudentName, exAngka(pnNum(d.harian)), exAngka(pnNum(d.pts)), exAngka(pnNum(d.pas)), exAngka(pnNum(d.hadir)), exAngka(pnNum(d.mentah)), { v: pnNum(d.akhir) ?? '', st: { b: true } }, `${s.bobot.harian}/${s.bobot.pts}/${s.bobot.pas}/${s.bobot.hadir}`, s.kkm]);
+                });
+            });
+            exLembarDokumen(wb, {
+                nama: 'Pengolahan Nilai', judul: 'DETAIL PENGOLAHAN NILAI', kiri, kanan, warnaTab: 'FF6B7785',
+                kolom: [{ judul: 'Mata Pelajaran', lebar: 20 }, { judul: 'No', lebar: 5, align: 'center' }, { judul: 'Nama Peserta Didik', lebar: 28 }, { judul: 'PH', lebar: 7, align: 'center' }, { judul: 'PTS', lebar: 7, align: 'center' },
+                    { judul: 'PAS', lebar: 7, align: 'center' }, { judul: 'Hadir (%)', lebar: 8, align: 'center' }, { judul: 'Nilai Mentah', lebar: 9, align: 'center' }, { judul: 'Nilai Akhir', lebar: 9, align: 'center' }, { judul: 'Bobot PH/PTS/PAS/Hadir', lebar: 13, align: 'center' }, { judul: 'KKTP', lebar: 6, align: 'center' }],
+                baris: det.length ? det : [['Belum ada mapel yang disimpan dari menu Pengolah Nilai. Nilai leger memakai rata-rata PH, PTS, dan PAS.', '', '', '', '', '', '', '', '', '', '']],
+                jabatan: 'Wali Kelas', xSplit: 3
+            });
+            await exSimpan(wb, `Rekap ${kelas} - Semester ${sem === 'ganjil' ? 'Ganjil' : 'Genap'} ${tapel.replace('/', '-')}.xlsx`);
+        }, downloadRekapExcelSederhana);
+    }
+
+    async function exportDeskripsiExcel() {
+        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value;
+        const kelas = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid;
+        document.querySelectorAll('.desc-text-row').forEach((ta, idx) => { if (currentDeskripsiData[idx]) currentDeskripsiData[idx].deskripsi = ta.value; });
+        await exJalankan('Deskripsi capaian rapor format sekolah', async () => {
+            const info = infoTapelDokumen(), wb = exWb();
+            exLembarDokumen(wb, {
+                nama: 'Deskripsi Rapor', judul: 'DESKRIPSI CAPAIAN KOMPETENSI RAPOR',
+                kiri: [['Mata Pelajaran', mapel], ['Kelas', kelas]], kanan: [['Semester', info.semLabel], ['Tahun Pelajaran', info.tapel]],
+                kolom: [{ judul: 'No', lebar: 5, align: 'center' }, { judul: 'Nama Peserta Didik', lebar: 28 }, { judul: 'Nilai Akhir', lebar: 9, align: 'center' }, { judul: 'Kategori', lebar: 14, align: 'center' }, { judul: 'Deskripsi Capaian Kompetensi', lebar: 70, wrap: true }],
+                baris: currentDeskripsiData.map(d => [d.no, d.nama, d.nilai, d.kategori, d.deskripsi]),
+                jabatan: 'Guru Mata Pelajaran', xSplit: 2
+            });
+            await exSimpan(wb, `Deskripsi Rapor ${mapel} ${kelas}.xlsx`);
+        }, exportDeskripsiExcelSederhana);
     }
 
     // --- Bank Data Standar Capaian & Tujuan Pembelajaran (TP) Kurikulum Merdeka ---
@@ -3468,7 +4087,7 @@ window.AGENDA_GURU_LOADED = true;
         }
     }
 
-    async function exportDeskripsiExcel() {
+    async function exportDeskripsiExcelSederhana() {
         await ensureXLSX();
         const cid = document.getElementById('nilai-kelas').value;
         const mapel = document.getElementById('nilai-mapel').value;
@@ -3614,15 +4233,17 @@ window.AGENDA_GURU_LOADED = true;
 
     // Modal Pengaturan Sekolah & Titimangsa Rapor
     function openModalPengaturanRapor() {
-        document.getElementById('setting-rapor-sekolah').value = db.config.userSchool || '';
-        document.getElementById('setting-rapor-alamat').value = db.config.schoolAddress || '';
-        document.getElementById('setting-rapor-kota').value = db.config.schoolCity || '';
         document.getElementById('setting-rapor-fase').value = db.config.raporFase || 'D';
         document.getElementById('setting-rapor-tanggal').value = db.config.raporTanggal || tanggalHariIni();
-        document.getElementById('setting-rapor-wali-nama').value = db.config.userName || '';
-        document.getElementById('setting-rapor-wali-nip').value = db.config.userNIP || '';
-        document.getElementById('setting-rapor-kepsek-nama').value = db.config.headmasterName || '';
-        document.getElementById('setting-rapor-kepsek-nip').value = db.config.headmasterNIP || '';
+        const ringkas = document.getElementById('rapor-profil-ringkas');
+        if (ringkas) {
+            const p = profilSekolah(), isi = v => v ? escapeHtml(v) : '<span class="text-danger">belum diisi</span>';
+            ringkas.innerHTML = `<div class="row g-1">
+                <div class="col-sm-4 text-muted">Sekolah</div><div class="col-sm-8 fw-semibold">${isi(p.sekolah)}</div>
+                <div class="col-sm-4 text-muted">Kota</div><div class="col-sm-8">${isi(p.kota)}</div>
+                <div class="col-sm-4 text-muted">Kepala Sekolah</div><div class="col-sm-8">${isi(p.kepsek)}${p.kepsekNip ? ' · NIP ' + escapeHtml(p.kepsekNip) : ''}</div>
+                <div class="col-sm-4 text-muted">Wali Kelas</div><div class="col-sm-8">${isi(p.guru)}${p.guruNip ? ' · NIP ' + escapeHtml(p.guruNip) : ''}</div></div>`;
+        }
 
         const modalEl = document.getElementById('modalPengaturanRapor');
         let modalInstance = bootstrap.Modal.getInstance(modalEl);
@@ -3632,15 +4253,8 @@ window.AGENDA_GURU_LOADED = true;
 
     function handleSavePengaturanRapor(e) {
         e.preventDefault();
-        db.config.userSchool = document.getElementById('setting-rapor-sekolah').value.trim();
-        db.config.schoolAddress = document.getElementById('setting-rapor-alamat').value.trim();
-        db.config.schoolCity = document.getElementById('setting-rapor-kota').value.trim();
         db.config.raporFase = document.getElementById('setting-rapor-fase').value;
         db.config.raporTanggal = document.getElementById('setting-rapor-tanggal').value;
-        db.config.userName = document.getElementById('setting-rapor-wali-nama').value.trim();
-        db.config.userNIP = document.getElementById('setting-rapor-wali-nip').value.trim();
-        db.config.headmasterName = document.getElementById('setting-rapor-kepsek-nama').value.trim();
-        db.config.headmasterNIP = document.getElementById('setting-rapor-kepsek-nip').value.trim();
 
         syncDB();
 
@@ -3654,7 +4268,7 @@ window.AGENDA_GURU_LOADED = true;
         Swal.fire({
             icon: 'success',
             title: 'Pengaturan Disimpan!',
-            text: 'Identitas sekolah dan titimangsa berhasil diperbarui untuk seluruh rapor.',
+            text: 'Fase dan tanggal rapor berhasil diperbarui untuk seluruh rapor.',
             timer: 1500,
             showConfirmButton: false
         });
@@ -5387,239 +6001,8 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // --- Unduh PDF Nilai Kokurikuler Berformat Sekolah Profesional ---
-    async function downloadKokuPDF() {
-        const data = getKokuExportData();
-        if (!data) return;
-        const { records, className, filterId, fileSuffix } = data;
-
-        Swal.fire({
-            title: 'Membuat Dokumen PDF...',
-            text: 'Menyusun format rekapitulasi penilaian kokurikuler profesional...',
-            allowOutsideClick: false,
-            didOpen: () => { Swal.showLoading(); }
-        });
-
-        try {
-            await ensurePDF();
-            const { jsPDF } = window.jspdf;
-
-            // Dokumen A4 Landscape
-            const doc = new jsPDF({
-                orientation: 'landscape',
-                unit: 'mm',
-                format: 'a4'
-            });
-
-            // 1. Kop Dokumen Resmi Sekolah
-            const schoolName = (db.config.userSchool || 'SEKOLAH DASAR / MENENGAH').toUpperCase();
-            const teacherName = db.config.userName || RAPOR_KOSONG;
-
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(14);
-            doc.setTextColor(23, 43, 77); // Deep Navy #172B4D
-            doc.text(schoolName, 148.5, 15, { align: 'center' });
-
-            doc.setFontSize(12);
-            doc.setTextColor(36, 59, 90); // Navy Secondary #243B5A
-            doc.text('REKAPITULASI PENILAIAN PROJEK KOKURIKULER', 148.5, 21, { align: 'center' });
-
-            // Garis Pembatas Kop Ganda
-            doc.setDrawColor(23, 43, 77);
-            doc.setLineWidth(0.6);
-            doc.line(15, 24.5, 282, 24.5);
-            doc.setDrawColor(148, 163, 184);
-            doc.setLineWidth(0.2);
-            doc.line(15, 25.5, 282, 25.5);
-
-            // Hitung Tahun Pelajaran & Semester Berjalan
-            const curDate = new Date();
-            const curYear = curDate.getFullYear();
-            const curMonth = curDate.getMonth() + 1;
-            const academicYear = curMonth >= 7 ? `${curYear}/${curYear + 1}` : `${curYear - 1}/${curYear}`;
-            const semester = curMonth >= 7 ? 'Ganjil' : 'Genap';
-
-            // 2. Informasi Metadata Dokumen Format Sekolah
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            doc.setTextColor(31, 41, 55);
-
-            // Kolom Kiri
-            doc.text(`Satuan Pendidikan : ${schoolName}`, 15, 30);
-            doc.text(`Kelas / Rombel       : ${className}`, 15, 35);
-
-            // Kolom Kanan
-            doc.text(`Tahun Pelajaran   : ${academicYear} (Semester ${semester})`, 185, 30);
-            doc.text(`Fasilitator / Guru : ${teacherName}`, 185, 35);
-
-            let startY = 40;
-
-            // Jika filter projek tunggal dipilih, sertakan rincian tema projek
-            if (filterId && records.length === 1) {
-                const rec = records[0];
-                let dims = [];
-                try { dims = JSON.parse(rec.Dimensi || '[]'); } catch (e) { }
-                const dimStr = dims.length > 0 ? dims.join(', ') : '-';
-
-                doc.setFont('helvetica', 'bold');
-                doc.text(`Nama Projek : ${rec.Projek} (${rec.Jenis === '7KAIH' ? '7KAIH' : 'Lintas Mata Pelajaran'})`, 15, 41);
-                doc.setFont('helvetica', 'normal');
-                doc.text(`Tanggal: ${formatTanggalIndo(rec.Tanggal)}  |  Dimensi Profil: ${dimStr}`, 15, 46);
-                startY = 51;
-            }
-
-            // 3. Susun Baris Data Tabel
-            let body = [];
-            let rowIdx = 1;
-
-            records.forEach(k => {
-                let kokuData = {};
-                try { kokuData = JSON.parse(k.KokuData || '{}'); } catch (e) { }
-
-                Object.keys(kokuData).forEach(sid => {
-                    const student = db.students.find(s => String(s.StudentID) === String(sid));
-                    const studentName = student ? student.StudentName : sid;
-                    const cat = kokuData[sid].Kategori || '-';
-                    const rawNarasi = (kokuData[sid].Narasi || '').replace(/<[^>]+>/g, '').trim();
-
-                    body.push([
-                        (rowIdx++).toString(),
-                        studentName,
-                        k.Projek || '-',
-                        cat,
-                        rawNarasi
-                    ]);
-                });
-            });
-
-            const tableHead = [['NO', 'NAMA SISWA', 'NAMA PROJEK', 'PREDIKAT / CAPAIAN', 'DESKRIPSI CAPAIAN PROFIL PELAJAR']];
-
-            doc.autoTable({
-                head: tableHead,
-                body: body,
-                startY: startY,
-                margin: { left: 15, right: 15, bottom: 18 },
-                theme: 'grid',
-                headStyles: {
-                    fillColor: [23, 43, 77], // #172B4D Deep Navy
-                    textColor: [255, 255, 255],
-                    fontStyle: 'bold',
-                    halign: 'center',
-                    valign: 'middle',
-                    fontSize: 8.5,
-                    cellPadding: 3
-                },
-                bodyStyles: {
-                    fontSize: 8,
-                    textColor: [31, 41, 55],
-                    valign: 'middle',
-                    lineColor: [226, 232, 240],
-                    lineWidth: 0.2,
-                    cellPadding: 2.5
-                },
-                alternateRowStyles: {
-                    fillColor: [248, 250, 252]
-                },
-                columnStyles: {
-                    0: { cellWidth: 12, halign: 'center' }, // No
-                    1: { cellWidth: 50, halign: 'left' },   // Nama Siswa
-                    2: { cellWidth: 44, halign: 'left' },   // Projek
-                    3: { cellWidth: 35, halign: 'center', fontStyle: 'bold' }, // Predikat
-                    4: { cellWidth: 126, halign: 'left' }   // Deskripsi
-                }
-            });
-
-            // 4. Kolom Tanda Tangan / Pengesahan Dokumen
-            let finalY = doc.lastAutoTable.finalY + 10;
-            if (finalY + 38 > 210 - 15) {
-                doc.addPage();
-                finalY = 22;
-            }
-
-            const colLeft = 25;
-            const colRight = 205;
-
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(8.5);
-            doc.setTextColor(31, 41, 55);
-
-            // Kolom Kiri: Kepala Sekolah
-            doc.text('Mengetahui,', colLeft, finalY);
-            doc.text('Kepala Sekolah', colLeft, finalY + 4.5);
-
-            // Kolom Kanan: Fasilitator / Guru
-            const signDateStr = formatTanggalIndo(tanggalHariIni()).replace(/^[A-Za-z]+,\s*/, '');
-            doc.text(`...................., ${signDateStr}`, colRight, finalY);
-            doc.text('Fasilitator Projek / Guru Kelas,', colRight, finalY + 4.5);
-
-            // Ruang Tanda Tangan
-            finalY += 24;
-            doc.setFont('helvetica', 'bold');
-            doc.text('( .................................................... )', colLeft, finalY);
-            doc.setFont('helvetica', 'normal');
-            doc.text('NIP. ............................................', colLeft, finalY + 4.5);
-
-            doc.setFont('helvetica', 'bold');
-            doc.text(`( ${teacherName} )`, colRight, finalY);
-            doc.setFont('helvetica', 'normal');
-            doc.text('NIP. ............................................', colRight, finalY + 4.5);
-
-            // 5. Nomor Halaman & Footer
-            const totalPages = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= totalPages; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.setFont('helvetica', 'italic');
-                doc.setTextColor(148, 163, 184);
-                doc.text('AgendaGuru – Aplikasi Manajemen Kelas Digital', 15, 203);
-                doc.text(`Halaman ${i} dari ${totalPages}`, 282, 203, { align: 'right' });
-            }
-
-            Swal.close();
-            const safeClassName = className.replace(/[^a-zA-Z0-9_-]/g, '_');
-            doc.save(`Rekap_Kokurikuler_${safeClassName}${fileSuffix}.pdf`);
-            Swal.fire('Berhasil!', 'Dokumen PDF Penilaian Kokurikuler profesional berhasil diunduh.', 'success');
-        } catch (err) {
-            console.error('Error saat membuat PDF kokurikuler:', err);
-            Swal.fire('Error', 'Gagal memproses dokumen PDF: ' + (err.message || err), 'error');
-        }
-    }
 
     // Export ke Word (.doc) memakai trik HTML-sebagai-dokumen-Word
-    function downloadKokuWord() {
-        const data = getKokuExportData();
-        if (!data) return;
-        const { records, className, fileSuffix } = data;
-
-        let bodyHtml = `<h2 style="font-family:Calibri,Arial,sans-serif; text-align:center;">REKAPITULASI PENILAIAN PROJEK KOKURIKULER</h2>`;
-        bodyHtml += `<p style="text-align:center; font-family:Calibri,Arial,sans-serif;">Kelas: ${escapeHtml(className)} | Satuan Pendidikan: ${escapeHtml(db.config.userSchool || 'Sekolah')}</p><hr/>`;
-
-        records.forEach(k => {
-            let kokuData = {}; try { kokuData = JSON.parse(k.KokuData || '{}'); } catch (e) { }
-            bodyHtml += `<h3 style="font-family:Calibri,Arial,sans-serif;">${escapeHtml(k.Projek || '-')}${k.Tanggal ? ' (' + formatTanggalIndo(k.Tanggal) + ')' : ''}</h3>`;
-            if (k.Deskripsi) bodyHtml += `<p style="font-family:Calibri,Arial,sans-serif;"><i>${escapeHtml(k.Deskripsi)}</i></p>`;
-            bodyHtml += `<table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse; width:100%; font-family:Calibri,Arial,sans-serif; font-size:10pt;">
-                    <tr style="background:#172B4D; color:#ffffff;"><th style="width:25%;">Nama Siswa</th><th style="width:20%;">Predikat</th><th>Deskripsi Capaian Profil</th></tr>`;
-            Object.keys(kokuData).forEach(sid => {
-                const student = db.students.find(s => String(s.StudentID) === String(sid));
-                const name = student ? student.StudentName : sid;
-                bodyHtml += `<tr><td>${escapeHtml(name)}</td><td style="text-align:center; font-weight:bold;">${escapeHtml(kokuData[sid].Kategori)}</td><td>${kokuData[sid].Narasi.replace(/<[^>]+>/g, '')}</td></tr>`;
-            });
-            bodyHtml += `</table><br>`;
-        });
-
-        const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-                <head><meta charset="utf-8"><title>Rekap Kokurikuler</title></head>
-                <body>${bodyHtml}</body></html>`;
-
-        const blob = new Blob(['\ufeff', htmlDoc], { type: 'application/msword' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `Rekap_Kokurikuler_${className}${fileSuffix}.doc`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-    }
 
     // --- Jurnal Harian (Pemisahan Tampilan Input Jurnal & Riwayat Jurnal) ---
     function switchJurnalTab(tab) {
@@ -6024,237 +6407,6 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // --- Ekspor Dokumen PDF Jurnal Harian Profesional dengan Foto Dokumentasi ---
-    async function downloadJurnalPDF() {
-        const cFilter = document.getElementById('filter-jurnal-kelas').value;
-        if (!cFilter) return Swal.fire('Peringatan', 'Silakan pilih kelas terlebih dahulu sebelum mengunduh PDF!', 'warning');
-
-        let filtered = db.journal.filter(j => cFilter === 'All' || String(j.ClassID) === String(cFilter) || j.ClassID === 'All');
-        if (filtered.length === 0) return Swal.fire('Informasi', 'Belum ada catatan jurnal pada kelas yang dipilih.', 'info');
-
-        // Urutkan data berdasarkan tanggal
-        filtered.sort((a, b) => (a.Date > b.Date ? 1 : -1));
-
-        const className = cFilter === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(cFilter))?.ClassName || cFilter);
-
-        Swal.fire({
-            title: 'Membuat Dokumen PDF...',
-            text: 'Menyusun format jurnal profesional & memuat foto dokumentasi...',
-            allowOutsideClick: false,
-            didOpen: () => { Swal.showLoading(); }
-        });
-
-        try {
-            await ensurePDF();
-            const { jsPDF } = window.jspdf;
-
-            // Dokumen A4 Landscape untuk keterbacaan tabel dan kolom foto yang proporsional
-            const doc = new jsPDF({
-                orientation: 'landscape',
-                unit: 'mm',
-                format: 'a4'
-            });
-
-            // 1. Kop Dokumen Resmi
-            const schoolName = (db.config.userSchool || 'SEKOLAH DASAR / MENENGAH').toUpperCase();
-            const teacherName = db.config.userName || RAPOR_KOSONG;
-
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(14);
-            doc.setTextColor(23, 43, 77); // Deep Navy #172B4D
-            doc.text(schoolName, 148.5, 15, { align: 'center' });
-
-            doc.setFontSize(12);
-            doc.setTextColor(36, 59, 90); // Navy Secondary #243B5A
-            doc.text('AGENDA & JURNAL KEGIATAN PEMBELAJARAN GURU', 148.5, 21, { align: 'center' });
-
-            // Garis Pembatas Kop Ganda
-            doc.setDrawColor(23, 43, 77);
-            doc.setLineWidth(0.6);
-            doc.line(15, 24.5, 282, 24.5);
-            doc.setDrawColor(148, 163, 184);
-            doc.setLineWidth(0.2);
-            doc.line(15, 25.5, 282, 25.5);
-
-            // Hitung Tahun Pelajaran & Semester Berjalan
-            const curDate = new Date();
-            const curYear = curDate.getFullYear();
-            const curMonth = curDate.getMonth() + 1;
-            const academicYear = curMonth >= 7 ? `${curYear}/${curYear + 1}` : `${curYear - 1}/${curYear}`;
-            const semester = curMonth >= 7 ? 'Ganjil' : 'Genap';
-
-            // Informasi Metadata Dokumen Format Sekolah Resmi
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            doc.setTextColor(31, 41, 55);
-
-            // Kolom Kiri
-            doc.text(`Satuan Pendidikan : ${schoolName}`, 15, 30);
-            doc.text(`Kelas / Rombel       : ${className}`, 15, 35);
-
-            // Kolom Kanan (Informasi Administrasi Akademik Sekolah)
-            doc.text(`Tahun Pelajaran   : ${academicYear} (Semester ${semester})`, 185, 30);
-            doc.text(`Guru Pengampu     : ${teacherName}`, 185, 35);
-
-            // 2. Preload & Siapkan Data Baris beserta Gambar Foto
-            const rowsData = [];
-            for (let i = 0; i < filtered.length; i++) {
-                const j = filtered[i];
-                let imgSrc = j.AttachmentData || '';
-                if (!imgSrc && j.AttachmentUrl && j.AttachmentUrl.startsWith('data:image')) {
-                    imgSrc = j.AttachmentUrl;
-                }
-                if (!imgSrc && j.AttachmentUrl && (j.AttachmentUrl.startsWith('http') || j.AttachmentUrl.startsWith('blob'))) {
-                    try {
-                        imgSrc = await loadImageToDataUrl(j.AttachmentUrl);
-                    } catch (e) {
-                        imgSrc = null;
-                    }
-                }
-
-                const clsName = j.ClassID === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(j.ClassID))?.ClassName || j.ClassID);
-                const tglFormatted = formatTanggalIndo(j.Date);
-
-                rowsData.push({
-                    no: (i + 1).toString(),
-                    tanggal: tglFormatted,
-                    kelas: clsName,
-                    mapel: j.Subject || '-',
-                    isi: j.Content || '-',
-                    imgData: imgSrc,
-                    hasAttachNonImg: !imgSrc && j.AttachmentUrl && j.AttachmentUrl !== 'https://simulasi-url-drive.com/file' ? 'Ada Dokumen' : ''
-                });
-            }
-
-            const tableHead = [['NO', 'HARI / TANGGAL', 'KELAS', 'MATA PELAJARAN', 'URAIAN KEGIATAN PEMBELAJARAN', 'DOKUMENTASI FOTO']];
-            const tableBody = rowsData.map(r => [
-                r.no,
-                r.tanggal,
-                r.kelas,
-                r.mapel,
-                r.isi,
-                r.imgData ? '' : (r.hasAttachNonImg ? 'Lampiran File' : 'Tidak Ada Foto')
-            ]);
-
-            doc.autoTable({
-                head: tableHead,
-                body: tableBody,
-                startY: 40,
-                margin: { left: 15, right: 15, bottom: 18 },
-                theme: 'grid',
-                headStyles: {
-                    fillColor: [23, 43, 77], // #172B4D Deep Navy
-                    textColor: [255, 255, 255],
-                    fontStyle: 'bold',
-                    halign: 'center',
-                    valign: 'middle',
-                    fontSize: 8.5,
-                    cellPadding: 3
-                },
-                bodyStyles: {
-                    fontSize: 8,
-                    textColor: [31, 41, 55],
-                    valign: 'middle',
-                    lineColor: [226, 232, 240],
-                    lineWidth: 0.2,
-                    cellPadding: 2.5
-                },
-                alternateRowStyles: {
-                    fillColor: [248, 250, 252]
-                },
-                columnStyles: {
-                    0: { cellWidth: 12, halign: 'center' }, // No
-                    1: { cellWidth: 34, halign: 'center' }, // Hari/Tanggal
-                    2: { cellWidth: 24, halign: 'center' }, // Kelas
-                    3: { cellWidth: 36, halign: 'left' },   // Mapel
-                    4: { cellWidth: 111, halign: 'left' },  // Uraian Kegiatan
-                    5: { cellWidth: 50, halign: 'center' }  // Foto Dokumentasi
-                },
-                didParseCell: function (data) {
-                    if (data.section === 'body' && data.column.index === 5) {
-                        const row = rowsData[data.row.index];
-                        if (row && row.imgData) {
-                            // Berikan tinggi minimal yang lega untuk sel foto
-                            data.cell.styles.minCellHeight = 30;
-                        }
-                    }
-                },
-                didDrawCell: function (data) {
-                    if (data.section === 'body' && data.column.index === 5) {
-                        const row = rowsData[data.row.index];
-                        if (row && row.imgData) {
-                            const padding = 2;
-                            const maxW = data.cell.width - (padding * 2);
-                            const maxH = data.cell.height - (padding * 2);
-                            const targetW = Math.min(maxW, 44);
-                            const targetH = Math.min(maxH, 26);
-                            const posX = data.cell.x + (data.cell.width - targetW) / 2;
-                            const posY = data.cell.y + (data.cell.height - targetH) / 2;
-                            try {
-                                doc.addImage(row.imgData, 'JPEG', posX, posY, targetW, targetH);
-                            } catch (e) {
-                                console.warn('Gagal me-render foto pada baris PDF:', e);
-                            }
-                        }
-                    }
-                }
-            });
-
-            // 3. Kolom Tanda Tangan / Pengesahan Dokumen
-            let finalY = doc.lastAutoTable.finalY + 10;
-            // Cek apakah halaman masih muat untuk blok tanda tangan (~38mm)
-            if (finalY + 38 > 210 - 15) {
-                doc.addPage();
-                finalY = 22;
-            }
-
-            const colLeft = 25;
-            const colRight = 205;
-
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(8.5);
-            doc.setTextColor(31, 41, 55);
-
-            // Kolom Kiri: Kepala Sekolah
-            doc.text('Mengetahui,', colLeft, finalY);
-            doc.text('Kepala Sekolah', colLeft, finalY + 4.5);
-
-            // Kolom Kanan: Guru Pengampu
-            const signDateStr = formatTanggalIndo(tanggalHariIni()).replace(/^[A-Za-z]+,\s*/, '');
-            doc.text(`...................., ${signDateStr}`, colRight, finalY);
-            doc.text('Guru Kelas / Mata Pelajaran,', colRight, finalY + 4.5);
-
-            // Ruang Tanda Tangan
-            finalY += 24;
-            doc.setFont('helvetica', 'bold');
-            doc.text('( .................................................... )', colLeft, finalY);
-            doc.setFont('helvetica', 'normal');
-            doc.text('NIP. ............................................', colLeft, finalY + 4.5);
-
-            doc.setFont('helvetica', 'bold');
-            doc.text(`( ${teacherName} )`, colRight, finalY);
-            doc.setFont('helvetica', 'normal');
-            doc.text('NIP. ............................................', colRight, finalY + 4.5);
-
-            // 4. Nomor Halaman & Footer
-            const totalPages = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= totalPages; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.setFont('helvetica', 'italic');
-                doc.setTextColor(148, 163, 184);
-                doc.text('AgendaGuru – Aplikasi Manajemen Kelas Digital', 15, 203);
-                doc.text(`Halaman ${i} dari ${totalPages}`, 282, 203, { align: 'right' });
-            }
-
-            Swal.close();
-            const safeClassName = className.replace(/[^a-zA-Z0-9_-]/g, '_');
-            doc.save(`Jurnal_Harian_${safeClassName}.pdf`);
-            Swal.fire('Berhasil!', 'Dokumen PDF Jurnal Harian profesional beserta foto dokumentasi berhasil diunduh.', 'success');
-        } catch (err) {
-            console.error('Error saat men-download PDF jurnal:', err);
-            Swal.fire('Error', 'Gagal memproses dokumen PDF: ' + (err.message || err), 'error');
-        }
-    }
 
     // --- Profile ---
     let tempPhotoBase64 = "";
@@ -6871,7 +7023,7 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // --- Unduh Excel Poin Siswa Berformat Sekolah Profesional ---
-    async function downloadPoinExcel() {
+    async function downloadPoinExcelSederhana() {
         const cid = document.getElementById('filter-poin-kelas')?.value || document.getElementById('poin-kelas')?.value;
         if (!cid) return Swal.fire('Error', 'Silakan pilih kelas terlebih dahulu sebelum mengunduh Excel!', 'error');
 
@@ -7160,203 +7312,6 @@ window.AGENDA_GURU_LOADED = true;
         }
     }
     // --- Unduh PDF Poin Siswa Berformat Sekolah Profesional ---
-    async function downloadPoinPDF() {
-        const cid = document.getElementById('filter-poin-kelas')?.value || document.getElementById('poin-kelas')?.value;
-        if (!cid) return Swal.fire('Error', 'Silakan pilih kelas terlebih dahulu sebelum mengunduh PDF!', 'error');
-
-        const jenisFilter = document.getElementById('filter-poin-jenis')?.value || 'all';
-        const searchQuery = (document.getElementById('search-poin-text')?.value || '').toLowerCase().trim();
-
-        let records = db.poin.filter(p => cid === 'All' || String(p.ClassID) === String(cid))
-            .slice().sort((a, b) => String(b.Tanggal).localeCompare(String(a.Tanggal)));
-
-        if (jenisFilter === 'reward') records = records.filter(p => (Number(p.PoinReward) || 0) > 0);
-        else if (jenisFilter === 'pelanggaran') records = records.filter(p => (Number(p.PoinPelanggaran) || 0) > 0);
-
-        if (searchQuery) {
-            records = records.filter(p => {
-                const sName = (db.students.find(s => s.StudentID === p.StudentID)?.StudentName || '').toLowerCase();
-                const ket = (p.Keterangan || '').toLowerCase();
-                return sName.includes(searchQuery) || ket.includes(searchQuery);
-            });
-        }
-
-        if (records.length === 0) return Swal.fire('Informasi', 'Belum ada data poin siswa yang cocok untuk diunduh.', 'info');
-
-        const className = cid === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid);
-        const schoolName = (db.config.userSchool || 'SEKOLAH DASAR / MENENGAH').toUpperCase();
-        const teacherName = db.config.userName || RAPOR_KOSONG;
-
-        const curDate = new Date();
-        const curYear = curDate.getFullYear();
-        const curMonth = curDate.getMonth() + 1;
-        const academicYear = curMonth >= 7 ? `${curYear}/${curYear + 1}` : `${curYear - 1}/${curYear}`;
-        const semester = curMonth >= 7 ? 'Ganjil' : 'Genap';
-
-        Swal.fire({
-            title: 'Membuat Dokumen PDF...',
-            text: 'Menyusun dokumen PDF buku catatan poin siswa profesional...',
-            allowOutsideClick: false,
-            didOpen: () => { Swal.showLoading(); }
-        });
-
-        try {
-            await ensurePDF();
-            const { jsPDF } = window.jspdf;
-
-            // Format A4 Landscape
-            const doc = new jsPDF({
-                orientation: 'landscape',
-                unit: 'mm',
-                format: 'a4'
-            });
-
-            // 1. Kop Dokumen Resmi Sekolah
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(14);
-            doc.setTextColor(23, 43, 77); // Deep Navy #172B4D
-            doc.text(schoolName, 148.5, 15, { align: 'center' });
-
-            doc.setFontSize(12);
-            doc.setTextColor(36, 59, 90); // Navy Secondary #243B5A
-            doc.text('BUKU CATATAN DAN REKAPITULASI POIN SISWA', 148.5, 21, { align: 'center' });
-
-            // Garis Pembatas Kop Ganda
-            doc.setDrawColor(23, 43, 77);
-            doc.setLineWidth(0.6);
-            doc.line(15, 24.5, 282, 24.5);
-            doc.setDrawColor(148, 163, 184);
-            doc.setLineWidth(0.2);
-            doc.line(15, 25.5, 282, 25.5);
-
-            // 2. Informasi Metadata Dokumen
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            doc.setTextColor(31, 41, 55);
-
-            // Kolom Kiri
-            doc.text(`Satuan Pendidikan : ${schoolName}`, 15, 30);
-            doc.text(`Kelas / Rombel       : ${className}`, 15, 35);
-
-            // Kolom Kanan
-            doc.text(`Tahun Pelajaran   : ${academicYear} (Semester ${semester})`, 185, 30);
-            doc.text(`Guru Pengampu / BK: ${teacherName}`, 185, 35);
-
-            // 3. Susun Baris Data Tabel
-            const tableHead = [['NO', 'HARI / TANGGAL', 'NAMA SISWA', 'KELAS', 'REWARD (+)', 'PELANGGARAN (-)', 'TOTAL', 'KETERANGAN / CATATAN PEMBINAAN']];
-            const tableBody = records.map((p, idx) => {
-                const student = db.students.find(s => s.StudentID === p.StudentID);
-                const name = student ? student.StudentName : '(Siswa tidak ditemukan)';
-                const pClass = db.classes.find(c => String(c.ClassID) === String(p.ClassID))?.ClassName || p.ClassID;
-                const reward = Number(p.PoinReward) || 0;
-                const pelanggaran = Number(p.PoinPelanggaran) || 0;
-                const total = reward - pelanggaran;
-
-                return [
-                    (idx + 1).toString(),
-                    formatTanggalIndo(p.Tanggal),
-                    name,
-                    pClass,
-                    reward > 0 ? '+' + reward : '-',
-                    pelanggaran > 0 ? '-' + pelanggaran : '-',
-                    (total >= 0 ? '+' : '') + total,
-                    p.Keterangan || '-'
-                ];
-            });
-
-            doc.autoTable({
-                head: tableHead,
-                body: tableBody,
-                startY: 40,
-                margin: { left: 15, right: 15, bottom: 18 },
-                theme: 'grid',
-                headStyles: {
-                    fillColor: [23, 43, 77], // #172B4D Deep Navy
-                    textColor: [255, 255, 255],
-                    fontStyle: 'bold',
-                    halign: 'center',
-                    valign: 'middle',
-                    fontSize: 8.5,
-                    cellPadding: 3
-                },
-                bodyStyles: {
-                    fontSize: 8,
-                    textColor: [31, 41, 55],
-                    valign: 'middle',
-                    lineColor: [226, 232, 240],
-                    lineWidth: 0.2,
-                    cellPadding: 2.5
-                },
-                alternateRowStyles: {
-                    fillColor: [248, 250, 252]
-                },
-                columnStyles: {
-                    0: { cellWidth: 12, halign: 'center' }, // No
-                    1: { cellWidth: 32, halign: 'center' }, // Tanggal
-                    2: { cellWidth: 48, halign: 'left' },   // Nama Siswa
-                    3: { cellWidth: 24, halign: 'center' }, // Kelas
-                    4: { cellWidth: 24, halign: 'center', textColor: [33, 134, 91], fontStyle: 'bold' }, // Reward
-                    5: { cellWidth: 26, halign: 'center', textColor: [196, 71, 71], fontStyle: 'bold' }, // Pelanggaran
-                    6: { cellWidth: 22, halign: 'center', fontStyle: 'bold' }, // Total
-                    7: { cellWidth: 79, halign: 'left' }    // Keterangan
-                }
-            });
-
-            // 4. Kolom Tanda Tangan / Pengesahan Dokumen
-            let finalY = doc.lastAutoTable.finalY + 10;
-            if (finalY + 38 > 210 - 15) {
-                doc.addPage();
-                finalY = 22;
-            }
-
-            const colLeft = 25;
-            const colRight = 205;
-
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(8.5);
-            doc.setTextColor(31, 41, 55);
-
-            // Kolom Kiri: Kepala Sekolah
-            doc.text('Mengetahui,', colLeft, finalY);
-            doc.text('Kepala Sekolah', colLeft, finalY + 4.5);
-
-            // Kolom Kanan: Guru Pengampu / BK
-            const signDateStr = formatTanggalIndo(tanggalHariIni()).replace(/^[A-Za-z]+,\s*/, '');
-            doc.text(`...................., ${signDateStr}`, colRight, finalY);
-            doc.text('Guru Kelas / Guru Bimbingan Konseling,', colRight, finalY + 4.5);
-
-            // Ruang Tanda Tangan
-            finalY += 24;
-            doc.setFont('helvetica', 'bold');
-            doc.text('( .................................................... )', colLeft, finalY);
-            doc.setFont('helvetica', 'normal');
-            doc.text('NIP. ............................................', colLeft, finalY + 4.5);
-
-            doc.setFont('helvetica', 'bold');
-            doc.text(`( ${teacherName} )`, colRight, finalY);
-            doc.setFont('helvetica', 'normal');
-            doc.text('NIP. ............................................', colRight, finalY + 4.5);
-
-            // 5. Nomor Halaman & Footer
-            const totalPages = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= totalPages; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.setFont('helvetica', 'italic');
-                doc.setTextColor(148, 163, 184);
-                doc.text('AgendaGuru – Aplikasi Manajemen Kelas Digital', 15, 203);
-                doc.text(`Halaman ${i} dari ${totalPages}`, 282, 203, { align: 'right' });
-            }
-
-            Swal.close();
-            const safeClassName = className.replace(/[^a-zA-Z0-9_-]/g, '_');
-            doc.save(`Catatan_Poin_Siswa_${safeClassName}.pdf`);
-            Swal.fire('Berhasil!', 'Dokumen PDF Catatan Poin Siswa profesional berhasil diunduh.', 'success');
-        } catch (err) {
-            console.error('Error saat download PDF poin:', err);
-            Swal.fire('Error', 'Gagal memproses dokumen PDF: ' + (err.message || err), 'error');
-        }
-    }
 
     // =====================================
     // INTEGRASI WHATSAPP HELPER
@@ -7851,7 +7806,7 @@ window.AGENDA_GURU_LOADED = true;
         return s.metode === 'kkm' ? `Nilai < KKM disesuaikan ke ${s.rentangMin}-${s.rentangMax}` : s.metode === 'rentang' ? `Konversi ke rentang ${s.rentangMin}-${s.rentangMax}` : 'Tanpa penyesuaian';
     }
 
-    async function downloadPengolahExcel() {
+    async function downloadPengolahExcelSederhana() {
         const { cid, subj, sem, tapel } = pnSelection();
         if (!cid || !subj || pnRows.length === 0) return Swal.fire('Pilih Data', 'Pilih kelas dan mata pelajaran yang memiliki siswa.', 'warning');
         await ensureXLSX();
@@ -7928,7 +7883,7 @@ window.AGENDA_GURU_LOADED = true;
         box.innerHTML = `<table class="table table-bordered table-sm align-middle mb-0"><thead class="table-light">${head}</thead><tbody>${body}</tbody></table>`;
     }
 
-    async function downloadRekapExcel() {
+    async function downloadRekapExcelSederhana() {
         const cid = document.getElementById('rekap-kelas')?.value, sem = document.getElementById('rekap-semester')?.value || 'ganjil', tapel = getActiveTapel();
         if (!cid) return Swal.fire('Pilih Kelas', 'Pilih kelas yang akan direkap.', 'warning');
         await ensureXLSX();
@@ -8017,7 +7972,7 @@ window.AGENDA_GURU_LOADED = true;
             showDenyButton: true, showCancelButton: true,
             confirmButtonText: 'Isi Sekarang', denyButtonText: 'Tetap Lanjutkan', cancelButtonText: 'Batal'
         }).then(r => {
-            if (r.isConfirmed) openModalPengaturanRapor();
+            if (r.isConfirmed) bukaProfilSekolah();
             else if (r.isDenied) lanjut();
         });
     }
@@ -8033,7 +7988,7 @@ window.AGENDA_GURU_LOADED = true;
         div.id = 'rapor-setting-warning';
         div.className = 'alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2 no-print';
         div.innerHTML = `<div><i class="bi bi-exclamation-triangle me-1"></i> Data sekolah belum lengkap: <b>${kurang.map(escapeHtml).join(', ')}</b>. Bagian ini tampil sebagai titik-titik di rapor.</div>` +
-            '<button type="button" class="btn btn-sm btn-warning fw-semibold" onclick="openModalPengaturanRapor()"><i class="bi bi-gear me-1"></i> Isi Pengaturan Sekolah</button>';
+            '<button type="button" class="btn btn-sm btn-warning fw-semibold" onclick="bukaProfilSekolah()"><i class="bi bi-building me-1"></i> Lengkapi Profil Sekolah & Guru</button>';
         box.prepend(div);
     }
     const _previewRaporSiswaAsli = previewRaporSiswa;

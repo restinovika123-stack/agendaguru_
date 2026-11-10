@@ -1189,6 +1189,8 @@
             <ul class="nav flex-column mt-3">
                 <li class="nav-item"><a href="javascript:void(0)" class="nav-link active"
                         onclick="switchView('beranda')"><i class="bi bi-house-door"></i> Beranda</a></li>
+                <li class="nav-item"><a href="javascript:void(0)" class="nav-link" onclick="switchView('profil')"><i
+                            class="bi bi-building"></i> Profil Sekolah & Guru</a></li>
                 <li class="nav-item"><a href="javascript:void(0)" class="nav-link" onclick="switchView('kelas')"><i
                             class="bi bi-people"></i> Manajemen Kelas</a></li>
                 <li class="nav-item"><a href="javascript:void(0)" class="nav-link" onclick="switchView('absensi')"><i
@@ -1254,6 +1256,7 @@
             </div>
 
             <div id="view-beranda" class="view-section active">
+                <div id="beranda-profil-alert" class="alert alert-warning d-none align-items-center justify-content-between flex-wrap gap-2 mb-3" role="status"></div>
                 <div class="row mb-4">
                     <div class="col-12">
                         <div class="welcome-banner d-flex justify-content-between align-items-center">
@@ -2502,7 +2505,7 @@
                         </div>
                         <div class="d-flex flex-wrap gap-2">
                             <button type="button" class="btn btn-outline-secondary btn-sm fw-semibold" onclick="openModalPengaturanRapor()">
-                                <i class="bi bi-gear-fill me-1 text-primary"></i> Pengaturan Sekolah & Titimangsa
+                                <i class="bi bi-gear-fill me-1 text-primary"></i> Fase & Tanggal Rapor
                             </button>
                             <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" onclick="openModalCatatanWali()">
                                 <i class="bi bi-chat-left-quote-fill me-1"></i> Catatan Wali & Keputusan
@@ -2580,6 +2583,106 @@
             </div>
 
             <!-- View: Rekap Laporan (Excel) -->
+            <!-- ===== PROFIL SEKOLAH & GURU (dipakai semua dokumen unduhan & rapor) ===== -->
+            <div id="view-profil" class="view-section">
+                <div class="card-custom mb-4">
+                    <div class="card-body p-3 p-md-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
+                        <div>
+                            <h4 class="fw-bold mb-1" style="color: var(--navy-deep); letter-spacing: -0.3px;">Profil Sekolah & Guru</h4>
+                            <p class="text-muted small mb-0">Diisi sekali. Kop, identitas, dan tanda tangan di rapor serta semua dokumen unduhan (absensi, nilai, kokurikuler, jurnal, poin, rekap) otomatis memakai data ini.</p>
+                        </div>
+                        <span class="badge rounded-pill" id="profil-status-badge">-</span>
+                    </div>
+                </div>
+
+                <form id="form-profil-sekolah" onsubmit="simpanProfilSekolah(event)">
+                    <div class="row g-4">
+                        <div class="col-lg-7">
+                            <div class="card-custom mb-4">
+                                <div class="card-body p-4">
+                                    <h6 class="fw-bold mb-3" style="color: var(--navy-deep);"><i class="bi bi-buildings text-primary me-2"></i>Identitas Sekolah</h6>
+                                    <div class="row g-3">
+                                        <div class="col-md-8">
+                                            <label class="form-label small fw-bold mb-1" for="pf-sekolah">Nama Sekolah <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" id="pf-sekolah" placeholder="Cth: SD Negeri 1 Sukamaju" required>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold mb-1" for="pf-npsn">NPSN</label>
+                                            <input type="text" class="form-control" id="pf-npsn" inputmode="numeric" placeholder="Cth: 20212345">
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label small fw-bold mb-1" for="pf-alamat">Alamat Sekolah</label>
+                                            <input type="text" class="form-control" id="pf-alamat" placeholder="Cth: Jl. Pendidikan No. 10, Kec. Sukamaju">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label small fw-bold mb-1" for="pf-kota">Kota / Kabupaten <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" id="pf-kota" placeholder="Cth: Bandung" required>
+                                            <div class="form-text">Dipakai untuk tempat & tanggal tanda tangan.</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label small fw-bold mb-1" for="pf-kontak">Telepon / Email Sekolah</label>
+                                            <input type="text" class="form-control" id="pf-kontak" placeholder="Cth: (022) 123456 · sdn1@sekolah.sch.id">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card-custom mb-4">
+                                <div class="card-body p-4">
+                                    <h6 class="fw-bold mb-3" style="color: var(--navy-deep);"><i class="bi bi-pen text-success me-2"></i>Penandatangan Dokumen</h6>
+                                    <div class="row g-3">
+                                        <div class="col-md-7">
+                                            <label class="form-label small fw-bold mb-1" for="pf-kepsek">Nama Kepala Sekolah <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" id="pf-kepsek" placeholder="Cth: Dra. Siti Rahmawati, M.Pd." required>
+                                        </div>
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-bold mb-1" for="pf-kepsek-nip">NIP Kepala Sekolah</label>
+                                            <input type="text" class="form-control" id="pf-kepsek-nip" placeholder="Kosongkan / '-' jika tidak ada">
+                                        </div>
+                                        <div class="col-md-7">
+                                            <label class="form-label small fw-bold mb-1" for="pf-guru">Nama Guru / Wali Kelas <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" id="pf-guru" placeholder="Cth: Ahmad Fauzi, S.Pd." required>
+                                        </div>
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-bold mb-1" for="pf-guru-nip">NIP Guru</label>
+                                            <input type="text" class="form-control" id="pf-guru-nip" placeholder="Kosongkan / '-' jika tidak ada">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-lg-5">
+                            <div class="card-custom mb-4">
+                                <div class="card-body p-4">
+                                    <h6 class="fw-bold mb-3" style="color: var(--navy-deep);"><i class="bi bi-file-earmark-richtext text-warning me-2"></i>Kop Dokumen</h6>
+                                    <label class="form-label small fw-bold mb-1" for="pf-kop1">Baris kop 1 <span class="text-muted fw-normal">(opsional)</span></label>
+                                    <input type="text" class="form-control mb-2" id="pf-kop1" placeholder="Cth: PEMERINTAH KABUPATEN BANDUNG">
+                                    <label class="form-label small fw-bold mb-1" for="pf-kop2">Baris kop 2 <span class="text-muted fw-normal">(opsional)</span></label>
+                                    <input type="text" class="form-control mb-3" id="pf-kop2" placeholder="Cth: DINAS PENDIDIKAN">
+                                    <label class="form-label small fw-bold mb-1" for="pf-logo-file">Logo Sekolah <span class="text-muted fw-normal">(opsional, PNG/JPG)</span></label>
+                                    <div class="d-flex align-items-center gap-2 mb-1">
+                                        <input type="file" class="form-control form-control-sm" id="pf-logo-file" accept="image/png,image/jpeg" onchange="pilihLogoSekolah(event)">
+                                        <button type="button" class="btn btn-sm btn-outline-danger" id="pf-logo-hapus" onclick="hapusLogoSekolah()" title="Hapus logo"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                    <div class="form-text mb-3">Logo diperkecil otomatis agar ringan.</div>
+
+                                    <div class="small fw-bold text-muted mb-1">Pratinjau kop:</div>
+                                    <div id="pf-kop-preview" class="border rounded-3 p-3 bg-white" style="font-family: Arial, sans-serif;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card-custom mb-4">
+                        <div class="card-body p-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                            <div class="small text-muted"><i class="bi bi-info-circle me-1"></i>Tanggal rapor & fase tetap diatur di menu <b>Cetak Rapor Siswa</b>.</div>
+                            <button type="submit" class="btn btn-primary fw-bold px-4"><i class="bi bi-check-circle me-1"></i> Simpan Profil</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
             <div id="view-rekap" class="view-section">
                 <div class="card-custom mb-4">
                     <div class="card-body p-3 p-md-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
@@ -3187,28 +3290,16 @@
                 <div class="modal-body p-4">
                     <form onsubmit="handleSavePengaturanRapor(event)">
                         <div class="alert alert-info py-2 px-3 small mb-3">
-                            <i class="bi bi-info-circle me-1"></i> Data sekolah dan penandatangan yang Anda simpan di sini akan <b>otomatis digunakan</b> pada seluruh pratinjau dan cetak rapor siswa tanpa perlu mengisi ulang.
+                            <i class="bi bi-info-circle me-1"></i> Fase dan tanggal rapor dipakai untuk seluruh rapor. Identitas sekolah dan penandatangan diambil dari menu <b>Profil Sekolah & Guru</b>.
                         </div>
 
-                        <!-- Data Satuan Pendidikan -->
+                        <!-- Pengaturan khusus rapor -->
                         <div class="card p-3 mb-3 border-0 bg-light rounded-3">
                             <h6 class="fw-bold mb-3" style="color: var(--navy-deep);">
-                                <i class="bi bi-buildings text-primary me-2"></i> Identitas Satuan Pendidikan
+                                <i class="bi bi-calendar-event text-primary me-2"></i> Pengaturan Cetak Rapor
                             </h6>
                             <div class="row g-3">
                                 <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">Nama Satuan Pendidikan:</label>
-                                    <input type="text" class="form-control" id="setting-rapor-sekolah" placeholder="Cth: SMP NEGERI 1 INDONESIA" required>
-                                </div>
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">Alamat Satuan Pendidikan:</label>
-                                    <input type="text" class="form-control" id="setting-rapor-alamat" placeholder="Cth: Jl. Pendidikan No. 10">
-                                </div>
-                                <div class="col-md-4 col-sm-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">Tempat Titimangsa (Kota):</label>
-                                    <input type="text" class="form-control" id="setting-rapor-kota" placeholder="Cth: Bandung / Jakarta" required>
-                                </div>
-                                <div class="col-md-4 col-sm-6 col-12">
                                     <label class="form-label small fw-bold mb-1">Fase Kurikulum Merdeka:</label>
                                     <select class="form-select" id="setting-rapor-fase">
                                         <option value="A">Fase A (Kelas 1 - 2 SD)</option>
@@ -3219,36 +3310,20 @@
                                         <option value="F">Fase F (Kelas 11 - 12 SMA)</option>
                                     </select>
                                 </div>
-                                <div class="col-md-4 col-sm-6 col-12">
+                                <div class="col-md-6 col-12">
                                     <label class="form-label small fw-bold mb-1">Tanggal Cetak Rapor:</label>
                                     <input type="date" class="form-control" id="setting-rapor-tanggal">
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Data Penandatangan Rapor -->
+                        <!-- Ringkasan dari Profil Sekolah & Guru -->
                         <div class="card p-3 mb-3 border-0 bg-light rounded-3">
-                            <h6 class="fw-bold mb-3" style="color: var(--navy-deep);">
-                                <i class="bi bi-pen text-success me-2"></i> Data Penandatangan Resmi Rapor
-                            </h6>
-                            <div class="row g-3">
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">Nama Guru / Wali Kelas:</label>
-                                    <input type="text" class="form-control" id="setting-rapor-wali-nama" placeholder="Cth: Resti Novika, M.Pd." required>
-                                </div>
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">NIP Guru / Wali Kelas:</label>
-                                    <input type="text" class="form-control" id="setting-rapor-wali-nip" placeholder="Cth: 198501012010012001 (atau '-' jika non-PNS)">
-                                </div>
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">Nama Kepala Sekolah:</label>
-                                    <input type="text" class="form-control" id="setting-rapor-kepsek-nama" placeholder="Cth: Dr. H. Ahmad Santoso, M.Pd." required>
-                                </div>
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">NIP Kepala Sekolah:</label>
-                                    <input type="text" class="form-control" id="setting-rapor-kepsek-nip" placeholder="Cth: 197005121995121001">
-                                </div>
+                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                                <h6 class="fw-bold mb-0" style="color: var(--navy-deep);"><i class="bi bi-building text-success me-2"></i> Identitas & Penandatangan</h6>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="bukaProfilSekolah()"><i class="bi bi-pencil-square me-1"></i> Ubah di Profil Sekolah & Guru</button>
                             </div>
+                            <div id="rapor-profil-ringkas" class="small"></div>
                         </div>
 
                         <div class="modal-footer px-0 pb-0 pt-2 border-0 d-flex justify-content-end gap-2">
@@ -3319,8 +3394,8 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="demo-data.js?v=20261110152444"></script>
-<script src="app.js?v=20261110152444"></script>
+    <script src="demo-data.js?v=20261110154848"></script>
+<script src="app.js?v=20261110154848"></script>
     
 </body>
 
