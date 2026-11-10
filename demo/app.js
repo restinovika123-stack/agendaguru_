@@ -1896,7 +1896,7 @@ window.AGENDA_GURU_LOADED = true;
         syncDB(); if (!isSilent) Swal.fire({ icon: 'success', title: 'Tersimpan', text: 'Data Absensi disimpan', timer: 1500, showConfirmButton: false });
     }
 
-    async function downloadAbsenExcel(semester) {
+    async function downloadAbsenExcelSederhana(semester) {
         const cid = document.getElementById('absen-kelas').value;
         if (!cid) return Swal.fire('Error', 'Pilih kelas', 'error');
         saveAbsensi(true); const className = db.classes.find(c => c.ClassID === cid)?.ClassName || cid;
@@ -2131,7 +2131,7 @@ window.AGENDA_GURU_LOADED = true;
         }
     });
 
-    async function downloadNilaiExcel(semester) {
+    async function downloadNilaiExcelSederhana(semester) {
         saveNilai(true); const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value;
         if (!cid || !mapel) return Swal.fire('Error', 'Pilih kelas & mapel', 'error');
         const className = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid;
@@ -2171,6 +2171,403 @@ window.AGENDA_GURU_LOADED = true;
             rekap_data.push([r.Name, avg.toFixed(1), slm.toFixed(1), sas.toFixed(1), ((avg + slm + sas) / 3).toFixed(1)]);
         });
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rekap_data), "Rekap"); XLSX.writeFile(wb, `Nilai_${mapel}_${semester}.xlsx`);
+    }
+
+    // =====================================================================
+    // EKSPOR EXCEL FORMAT SEKOLAH (kop, identitas, tabel bergaris, tanda tangan, siap cetak A4)
+    // Memakai ExcelJS (dimuat saat dibutuhkan). Jika gagal dimuat, dipakai format sederhana di atas.
+    // =====================================================================
+    let _exceljsLoaded = false;
+    async function ensureExcelJS() {
+        if (_exceljsLoaded) return;
+        await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+        if (typeof ExcelJS === 'undefined') throw new Error('ExcelJS tidak tersedia');
+        _exceljsLoaded = true;
+    }
+
+    const EXW = { judul: 'FF172B4D', kepala: 'FFDCE6F2', garis: 'FF6B7785', zebra: 'FFF7F9FC', abu: 'FF5E6C84', merah: 'FFC0392B', hijau: 'FF1E7D4F',
+        S: 'FFFFF2CC', I: 'FFDDEBF7', A: 'FFF8D7DA', tuntas: 'FFE2F0D9', belum: 'FFF8D7DA' };
+    const EX_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+    function exKol(n) { let s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; }
+    function exGaris() { const g = { style: 'thin', color: { argb: EXW.garis } }; return { top: g, left: g, bottom: g, right: g }; }
+    function exSemLabel(sem) { return sem === 'ganjil' ? '1 (Ganjil)' : '2 (Genap)'; }
+    function exTahunBulan(m, tapel) { const y = parseInt(String(tapel || '').slice(0, 4), 10) || new Date().getFullYear(); return Number(m) >= 7 ? y : y + 1; }
+    function exTglPanjang(d) { return d.getDate() + ' ' + EX_BULAN[d.getMonth()] + ' ' + d.getFullYear(); }
+    function exTglIso(s) { const p = String(s || '').split('-'); return p.length === 3 ? `${parseInt(p[2], 10)} ${EX_BULAN[parseInt(p[1], 10) - 1] || ''} ${p[0]}` : ''; }
+    function exNamaFile(s) { return String(s).replace(/[\\/:*?"<>|]/g, '-'); }
+    function exNum(v) { if (v === '' || v === null || v === undefined) return null; const n = parseFloat(v); return isNaN(n) ? null : n; }
+
+    // Tulis sel dengan gaya. st: { b, i, size, color, align, valign, wrap, fill, border, fmt }
+    function exSel(ws, r, c, v, st) {
+        st = st || {};
+        const cell = ws.getCell(r, c);
+        if (v !== undefined) cell.value = v;
+        cell.font = { name: 'Arial', size: st.size || 10, bold: !!st.b, italic: !!st.i, underline: st.u ? 'single' : undefined, color: st.color ? { argb: st.color } : undefined };
+        cell.alignment = { vertical: st.valign || 'middle', horizontal: st.align || 'left', wrapText: !!st.wrap };
+        if (st.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: st.fill } };
+        if (st.border) cell.border = exGaris();
+        if (st.fmt) cell.numFmt = st.fmt;
+        return cell;
+    }
+    function exGabung(ws, r1, c1, r2, c2, v, st) {
+        if (r1 !== r2 || c1 !== c2) ws.mergeCells(r1, c1, r2, c2);
+        const cell = exSel(ws, r1, c1, v, st);
+        if (st && (st.border || st.fill)) for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) {
+            if (st.border) ws.getCell(r, c).border = exGaris();
+            if (st.fill) ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: st.fill } };
+        }
+        return cell;
+    }
+    const EX_HEAD = { b: true, align: 'center', wrap: true, fill: EXW.kepala, border: true, size: 9 };
+
+    // Kop: judul, nama sekolah, alamat + garis. Mengembalikan baris berikutnya yang kosong.
+    function exKop(ws, judul, lastCol) {
+        const c = db.config || {};
+        exGabung(ws, 1, 1, 1, lastCol, judul, { b: true, size: 14, align: 'center', color: EXW.judul });
+        exGabung(ws, 2, 1, 2, lastCol, String(c.userSchool || 'Nama Sekolah').toUpperCase(), { b: true, size: 12, align: 'center' });
+        exGabung(ws, 3, 1, 3, lastCol, c.schoolAddress || '', { size: 9, i: true, align: 'center', color: EXW.abu });
+        ws.getRow(1).height = 22; ws.getRow(2).height = 18;
+        for (let col = 1; col <= lastCol; col++) ws.getCell(3, col).border = { bottom: { style: 'medium', color: { argb: EXW.judul } } };
+        return 5;
+    }
+    // Identitas dua sisi: kiri & kanan = [[label, nilai], ...]
+    function exIdentitas(ws, row, kiri, kanan, lastCol) {
+        const R = Math.max(5, lastCol - 8);
+        const n = Math.max(kiri.length, kanan.length);
+        for (let i = 0; i < n; i++) {
+            const r = row + i;
+            if (kiri[i]) { exSel(ws, r, 2, kiri[i][0], { b: true }); exGabung(ws, r, 3, r, 4, ': ' + (kiri[i][1] || '-'), {}); }
+            if (kanan[i]) { exGabung(ws, r, R, r, R + 3, kanan[i][0], { b: true }); exGabung(ws, r, R + 4, r, lastCol, ': ' + (kanan[i][1] || '-'), {}); }
+        }
+        return row + n + 1;
+    }
+    // Tanda tangan: kiri Kepala Sekolah, kanan guru/wali kelas
+    function exTtd(ws, row, lastCol, jabatanKanan) {
+        const c = db.config || {};
+        const R = Math.max(5, lastCol - 8);
+        const kiri = (r, v, st) => exGabung(ws, r, 2, r, 4, v, Object.assign({ align: 'center' }, st || {}));
+        const kanan = (r, v, st) => exGabung(ws, r, R, r, lastCol, v, Object.assign({ align: 'center' }, st || {}));
+        const tgl = (c.schoolCity ? c.schoolCity + ', ' : '') + exTglPanjang(new Date());
+        kiri(row, 'Mengetahui,'); kanan(row, tgl);
+        kiri(row + 1, 'Kepala ' + (c.userSchool || 'Sekolah')); kanan(row + 1, jabatanKanan + ',');
+        kiri(row + 5, c.headmasterName || '(.....................................)', { b: true, u: true });
+        kanan(row + 5, c.userName || '(.....................................)', { b: true, u: true });
+        kiri(row + 6, 'NIP. ' + (c.headmasterNIP || '.................................'));
+        kanan(row + 6, 'NIP. ' + (c.userNIP || '.................................'));
+        return row + 7;
+    }
+    // Pengaturan cetak A4: pilih tegak/mendatar otomatis; jika masih terbaca jelas, muat dalam 1 halaman
+    // (agar tanda tangan tidak terpisah). Jika terlalu panjang, lebar 1 halaman dan judul tabel diulang.
+    function exHalaman(ws, lastCol, hRow1, hRow2) {
+        let W = 0, H = 0;
+        for (let c = 1; c <= lastCol; c++) W += (ws.getColumn(c).width || 9) * 5.6;
+        for (let r = 1; r <= ws.rowCount; r++) H += ws.getRow(r).height || 15;
+        const sP = Math.min(537 / W, 763 / H, 1), sL = Math.min(784 / W, 516 / H, 1);
+        const satuHalaman = Math.max(sP, sL) >= 0.6;
+        const landscape = satuHalaman ? sL > sP : W > 537;
+        ws.pageSetup = {
+            paperSize: 9, orientation: landscape ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: satuHalaman ? 1 : 0,
+            horizontalCentered: true, printTitlesRow: satuHalaman ? undefined : hRow1 + ':' + hRow2,
+            margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.6, header: 0.2, footer: 0.25 }
+        };
+        if (!ws.pageSetup.printTitlesRow) delete ws.pageSetup.printTitlesRow;
+        ws.headerFooter = { oddFooter: '&C&8Halaman &P dari &N' };
+        ws.views = [{ state: 'frozen', xSplit: 4, ySplit: hRow2, showGridLines: false }];
+    }
+    function exKolomDasar(ws) {
+        ws.getColumn(1).width = 5; ws.getColumn(2).width = 13; ws.getColumn(3).width = 32; ws.getColumn(4).width = 5;
+    }
+    // Kolom identitas siswa (No, NIS, Nama, L/P)
+    function exSiswa(ws, r, i, s, zebra) {
+        const base = { border: true, size: 9, fill: zebra ? EXW.zebra : undefined };
+        exSel(ws, r, 1, i + 1, Object.assign({ align: 'center' }, base));
+        exSel(ws, r, 2, s.NIS || '', Object.assign({ align: 'center' }, base));
+        exSel(ws, r, 3, s.StudentName || '', base);
+        exSel(ws, r, 4, s.JenisKelamin || '', Object.assign({ align: 'center' }, base));
+    }
+    async function exSimpan(wb, nama) {
+        const buf = await wb.xlsx.writeBuffer();
+        const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = exNamaFile(nama);
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    }
+
+    // ---------- ABSENSI ----------
+    function exDataAbsenBulan(cid, m, tapel, stds) {
+        const rec = db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(m) && matchTapel(a, tapel));
+        if (!rec) return null;
+        let dates = [], att = {};
+        try { dates = JSON.parse(rec.DatesData) || []; att = JSON.parse(rec.AttendanceData) || {}; } catch (e) { return null; }
+        const idx = [];
+        dates.forEach((d, i) => { if (d || stds.some(s => (att[s.StudentID] || [])[i] && att[s.StudentID][i] !== '-')) idx.push(i); });
+        if (!idx.length) return null;
+        return { dates: idx.map(i => dates[i] || ''), nilai: sid => idx.map(i => { const v = (att[sid] || [])[i]; return v && v !== '-' ? v : ''; }) };
+    }
+
+    function exSheetAbsenBulan(wb, m, data, stds, info) {
+        const nT = data.dates.length, cS = 5 + nT, lastCol = cS + 4;
+        const ws = wb.addWorksheet(EX_BULAN[Number(m) - 1], { properties: { tabColor: { argb: 'FF159A9C' } } });
+        exKolomDasar(ws);
+        for (let c = 5; c < cS; c++) ws.getColumn(c).width = 4.3;
+        for (let c = cS; c < cS + 4; c++) ws.getColumn(c).width = 5;
+        ws.getColumn(lastCol).width = 8;
+
+        let r = exKop(ws, 'DAFTAR HADIR PESERTA DIDIK', lastCol);
+        r = exIdentitas(ws, r, [['Kelas', info.kelas], ['Wali Kelas', (db.config || {}).userName]],
+            [['Bulan', EX_BULAN[Number(m) - 1] + ' ' + exTahunBulan(m, info.tapel)], ['Semester', exSemLabel(info.sem)], ['Tahun Pelajaran', info.tapel]], lastCol);
+
+        const h1 = r, h2 = r + 1;
+        exGabung(ws, h1, 1, h2, 1, 'No', EX_HEAD); exGabung(ws, h1, 2, h2, 2, 'NIS', EX_HEAD);
+        exGabung(ws, h1, 3, h2, 3, 'Nama Peserta Didik', EX_HEAD); exGabung(ws, h1, 4, h2, 4, 'L/P', EX_HEAD);
+        exGabung(ws, h1, 5, h1, cS - 1, nT >= 5 ? 'Tanggal Pertemuan' : 'Tanggal', EX_HEAD);
+        data.dates.forEach((d, j) => exSel(ws, h2, 5 + j, d ? String(parseInt(d.split('-')[2], 10)) : '-', EX_HEAD));
+        exGabung(ws, h1, cS, h1, cS + 3, 'Jumlah', EX_HEAD);
+        ['S', 'I', 'A', 'H'].forEach((k, j) => exSel(ws, h2, cS + j, k, EX_HEAD));
+        exGabung(ws, h1, lastCol, h2, lastCol, '% Hadir', EX_HEAD);
+        ws.getRow(h1).height = 18; ws.getRow(h2).height = 18;
+
+        const r0 = h2 + 1, kT1 = exKol(5), kT2 = exKol(cS - 1);
+        stds.forEach((s, i) => {
+            const rr = r0 + i, zebra = i % 2 === 1, vals = data.nilai(s.StudentID);
+            exSiswa(ws, rr, i, s, zebra);
+            vals.forEach((v, j) => exSel(ws, rr, 5 + j, v, { align: 'center', border: true, size: 9, b: v === 'A', color: v === 'A' ? EXW.merah : undefined, fill: EXW[v] && v !== 'H' ? EXW[v] : (zebra ? EXW.zebra : undefined) }));
+            const hit = k => vals.filter(v => v === k).length;
+            ['S', 'I', 'A', 'H'].forEach((k, j) => exSel(ws, rr, cS + j, { formula: `COUNTIF(${kT1}${rr}:${kT2}${rr},"${k}")`, result: hit(k) }, { align: 'center', border: true, size: 9, b: true, fill: zebra ? EXW.zebra : undefined }));
+            const tot = hit('S') + hit('I') + hit('A') + hit('H');
+            const kS = exKol(cS), kH = exKol(cS + 3);
+            exSel(ws, rr, lastCol, { formula: `IF(SUM(${kS}${rr}:${kH}${rr})=0,"",${kH}${rr}/SUM(${kS}${rr}:${kH}${rr}))`, result: tot ? hit('H') / tot : '' }, { align: 'center', border: true, size: 9, fmt: '0%', fill: zebra ? EXW.zebra : undefined });
+        });
+        const rEnd = r0 + stds.length - 1, rJ = rEnd + 1;
+        exGabung(ws, rJ, 1, rJ, 4, 'Jumlah Hadir', { b: true, align: 'right', border: true, fill: EXW.kepala, size: 9 });
+        for (let c = 5; c < cS; c++) {
+            const k = exKol(c), h = stds.filter(s => data.nilai(s.StudentID)[c - 5] === 'H').length;
+            exSel(ws, rJ, c, { formula: `COUNTIF(${k}${r0}:${k}${rEnd},"H")`, result: h }, { b: true, align: 'center', border: true, fill: EXW.kepala, size: 9 });
+        }
+        for (let c = cS; c < cS + 4; c++) {
+            const k = exKol(c);
+            exSel(ws, rJ, c, { formula: `SUM(${k}${r0}:${k}${rEnd})` }, { b: true, align: 'center', border: true, fill: EXW.kepala, size: 9 });
+        }
+        exSel(ws, rJ, lastCol, '', { border: true, fill: EXW.kepala });
+        exGabung(ws, rJ + 1, 1, rJ + 1, lastCol, 'Keterangan:  H = Hadir   S = Sakit   I = Izin   A = Alpa (tanpa keterangan)', { size: 8, i: true, color: EXW.abu });
+        exTtd(ws, rJ + 3, lastCol, 'Wali Kelas');
+        exHalaman(ws, lastCol, h1, h2);
+    }
+
+    function exSheetRekapAbsen(wb, bulanAda, stds, info) {
+        const nB = bulanAda.length, cJ = 5 + nB * 3, lastCol = cJ + 6;
+        const ws = wb.addWorksheet('Rekap Semester', { properties: { tabColor: { argb: 'FF172B4D' } } });
+        exKolomDasar(ws);
+        for (let c = 5; c < cJ; c++) ws.getColumn(c).width = 4.3;
+        for (let c = cJ; c < cJ + 4; c++) ws.getColumn(c).width = 5.5;
+        ws.getColumn(cJ + 4).width = 10; ws.getColumn(cJ + 5).width = 8; ws.getColumn(lastCol).width = 14;
+
+        let r = exKop(ws, 'REKAPITULASI KEHADIRAN PESERTA DIDIK', lastCol);
+        r = exIdentitas(ws, r, [['Kelas', info.kelas], ['Wali Kelas', (db.config || {}).userName]], [['Semester', exSemLabel(info.sem)], ['Tahun Pelajaran', info.tapel]], lastCol);
+        const h1 = r, h2 = r + 1;
+        exGabung(ws, h1, 1, h2, 1, 'No', EX_HEAD); exGabung(ws, h1, 2, h2, 2, 'NIS', EX_HEAD);
+        exGabung(ws, h1, 3, h2, 3, 'Nama Peserta Didik', EX_HEAD); exGabung(ws, h1, 4, h2, 4, 'L/P', EX_HEAD);
+        bulanAda.forEach((b, j) => {
+            const c = 5 + j * 3;
+            exGabung(ws, h1, c, h1, c + 2, EX_BULAN[Number(b.m) - 1], EX_HEAD);
+            ['S', 'I', 'A'].forEach((k, x) => exSel(ws, h2, c + x, k, EX_HEAD));
+        });
+        exGabung(ws, h1, cJ, h1, cJ + 3, 'Jumlah Semester', EX_HEAD);
+        ['S', 'I', 'A', 'H'].forEach((k, x) => exSel(ws, h2, cJ + x, k, EX_HEAD));
+        exGabung(ws, h1, cJ + 4, h2, cJ + 4, 'Jumlah Pertemuan', EX_HEAD);
+        exGabung(ws, h1, cJ + 5, h2, cJ + 5, '% Hadir', EX_HEAD);
+        exGabung(ws, h1, lastCol, h2, lastCol, 'Keterangan', EX_HEAD);
+        ws.getRow(h1).height = 18; ws.getRow(h2).height = 18;
+
+        const r0 = h2 + 1;
+        stds.forEach((s, i) => {
+            const rr = r0 + i, zebra = i % 2 === 1, st = { align: 'center', border: true, size: 9, fill: zebra ? EXW.zebra : undefined };
+            exSiswa(ws, rr, i, s, zebra);
+            const tot = { S: 0, I: 0, A: 0, H: 0 }; let pert = 0;
+            bulanAda.forEach((b, j) => {
+                const v = b.data.nilai(s.StudentID);
+                ['S', 'I', 'A'].forEach((k, x) => { const n = v.filter(t => t === k).length; tot[k] += n; exSel(ws, rr, 5 + j * 3 + x, n || '', st); });
+                tot.H += v.filter(t => t === 'H').length; pert += v.filter(t => t).length;
+            });
+            ['S', 'I', 'A'].forEach((k, x) => {
+                const cols = bulanAda.map((b, j) => exKol(5 + j * 3 + x) + rr).join(',');
+                exSel(ws, rr, cJ + x, cols ? { formula: `SUM(${cols})`, result: tot[k] } : 0, Object.assign({}, st, { b: true, color: k === 'A' && tot.A >= 3 ? EXW.merah : undefined }));
+            });
+            exSel(ws, rr, cJ + 3, tot.H, Object.assign({}, st, { b: true }));
+            exSel(ws, rr, cJ + 4, pert, st);
+            const kH = exKol(cJ + 3), kP = exKol(cJ + 4), persen = pert ? tot.H / pert : '';
+            exSel(ws, rr, cJ + 5, { formula: `IF(${kP}${rr}=0,"",${kH}${rr}/${kP}${rr})`, result: persen }, Object.assign({}, st, { fmt: '0.0%' }));
+            const ket = persen === '' ? '-' : persen >= 0.95 ? 'Sangat Baik' : persen >= 0.85 ? 'Baik' : persen >= 0.75 ? 'Cukup' : 'Perlu Perhatian';
+            exSel(ws, rr, lastCol, ket, Object.assign({}, st, { color: ket === 'Perlu Perhatian' ? EXW.merah : undefined, b: ket === 'Perlu Perhatian' }));
+        });
+        const rN = r0 + stds.length;
+        exGabung(ws, rN, 1, rN, lastCol, 'Keterangan % hadir: Sangat Baik ≥ 95%, Baik ≥ 85%, Cukup ≥ 75%, Perlu Perhatian < 75%. S = Sakit, I = Izin, A = Alpa, H = Hadir.', { size: 8, i: true, color: EXW.abu });
+        exTtd(ws, rN + 2, lastCol, 'Wali Kelas');
+        exHalaman(ws, lastCol, h1, h2);
+    }
+
+    async function eksporAbsensiSekolah(semester) {
+        const cid = document.getElementById('absen-kelas').value;
+        const tapel = getActiveTapel();
+        const kelas = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid;
+        const stds = db.students.filter(s => String(s.ClassID) === String(cid));
+        const months = semester === 'ganjil' ? ['07', '08', '09', '10', '11', '12'] : ['01', '02', '03', '04', '05', '06'];
+        const bulanAda = months.map(m => ({ m, data: exDataAbsenBulan(cid, m, tapel, stds) })).filter(b => b.data);
+        if (!bulanAda.length) { Swal.fire('Belum Ada Data', `Belum ada data absensi ${kelas} pada semester ${semester} TP ${tapel}.`, 'info'); return false; }
+        await ensureExcelJS();
+        const wb = new ExcelJS.Workbook(); wb.creator = 'AgendaGuru'; wb.created = new Date();
+        const info = { kelas, tapel, sem: semester };
+        bulanAda.forEach(b => exSheetAbsenBulan(wb, b.m, b.data, stds, info));
+        exSheetRekapAbsen(wb, bulanAda, stds, info);
+        await exSimpan(wb, `Daftar Hadir ${kelas} - Semester ${semester === 'ganjil' ? 'Ganjil' : 'Genap'} ${tapel.replace('/', '-')}.xlsx`);
+        return true;
+    }
+
+    async function downloadAbsenExcel(semester) {
+        const cid = document.getElementById('absen-kelas').value;
+        if (!cid) return Swal.fire('Error', 'Pilih kelas', 'error');
+        saveAbsensi(true);
+        Swal.fire({ title: 'Menyiapkan Excel...', text: 'Daftar hadir format sekolah', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            if (await eksporAbsensiSekolah(semester)) Swal.fire({ icon: 'success', title: 'Excel siap', text: 'File daftar hadir sudah diunduh.', timer: 1800, showConfirmButton: false });
+        } catch (e) {
+            console.error('Ekspor format sekolah gagal, memakai format sederhana:', e);
+            Swal.close(); await downloadAbsenExcelSederhana(semester);
+        }
+    }
+
+    // ---------- NILAI ----------
+    // Nilai rapor: sama dengan perhitungan rapor (hasil Pengolah Nilai jika ada, selain itu rata-rata PH/PTS/PAS yang terisi)
+    function exNilaiRapor(cid, sid, mapel, sem, tapel) {
+        const olah = getNilaiOlahanSiswa(cid, mapel, sem, tapel, sid);
+        if (olah !== null) return olah;
+        const k = getNilaiKomponen(cid, sid, mapel, sem, tapel);
+        const ada = [k.harian, k.pts, k.pas].filter(v => v !== null);
+        return ada.length ? Math.round(ada.reduce((a, b) => a + b, 0) / ada.length * 10) / 10 : null;
+    }
+
+    async function eksporNilaiSekolah(semester) {
+        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value;
+        const tapel = getActiveTapel(), c = db.config || {};
+        const kelas = db.classes.find(x => String(x.ClassID) === String(cid))?.ClassName || cid;
+        const stds = db.students.filter(s => String(s.ClassID) === String(cid));
+        const months = semester === 'ganjil' ? ['07', '08', '09', '10', '11', '12'] : ['01', '02', '03', '04', '05', '06'];
+
+        // Kolom Penilaian Harian sepanjang semester
+        const ph = [];
+        months.forEach(m => {
+            const rec = db.grades.find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === 'Formatif' && String(g.MonthYear) === String(m) && matchTapel(g, tapel));
+            if (!rec) return;
+            let dates = [], gd = {}, cak = [];
+            try { dates = JSON.parse(rec.DatesData) || []; gd = JSON.parse(rec.GradesData) || {}; cak = JSON.parse(rec.Cakupan || '[]') || []; } catch (e) { return; }
+            dates.forEach((d, i) => {
+                const nilai = {}; let ada = false;
+                stds.forEach(s => { const n = exNum((gd[s.StudentID] || [])[i]); nilai[s.StudentID] = n; if (n !== null) ada = true; });
+                if (d || ada) ph.push({ tgl: d, cakupan: cak[i] || '', nilai });
+            });
+        });
+        const single = type => {
+            const rec = db.grades.slice().reverse().find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === type && isGradeMatchingSemester(g, semester) && matchTapel(g, tapel));
+            let d = {}; if (rec) try { d = JSON.parse(rec.GradesData) || {}; } catch (e) { }
+            return sid => exNum((d[sid] || [])[0]);
+        };
+        const pts = single('SumatifLM'), pas = single('SumatifAS');
+        const olahRec = findNilaiOlahan(cid, mapel, semester, tapel);
+        let kktp = parseFloat(document.getElementById('input-kkm')?.value) || 75;
+        if (olahRec) { try { const st = JSON.parse(olahRec.Pengaturan || '{}'); if (exNum(st.kkm) !== null) kktp = exNum(st.kkm); } catch (e) { } }
+
+        const adaNilai = ph.length || stds.some(s => pts(s.StudentID) !== null || pas(s.StudentID) !== null || olahRec);
+        if (!adaNilai) { Swal.fire('Belum Ada Data', `Belum ada nilai ${mapel} ${kelas} pada semester ${semester} TP ${tapel}.`, 'info'); return false; }
+        await ensureExcelJS();
+
+        const nP = ph.length, cR = 5 + nP, lastCol = cR + 4; // Rata PH, PTS, PAS, Nilai Rapor, Ketuntasan
+        const wb = new ExcelJS.Workbook(); wb.creator = 'AgendaGuru'; wb.created = new Date();
+        const ws = wb.addWorksheet('Daftar Nilai', { properties: { tabColor: { argb: 'FF159A9C' } } });
+        exKolomDasar(ws);
+        for (let x = 5; x < cR; x++) ws.getColumn(x).width = 6;
+        [8.5, 8.5, 8.5, 9, 12].forEach((w, j) => ws.getColumn(cR + j).width = w);
+
+        let r = exKop(ws, 'DAFTAR NILAI PESERTA DIDIK', lastCol);
+        r = exIdentitas(ws, r, [['Mata Pelajaran', mapel], ['Kelas', kelas], ['Fase', c.raporFase || '-']],
+            [['Semester', exSemLabel(semester)], ['Tahun Pelajaran', tapel], ['KKTP', String(kktp)]], lastCol);
+
+        const h1 = r, h2 = r + 1;
+        exGabung(ws, h1, 1, h2, 1, 'No', EX_HEAD); exGabung(ws, h1, 2, h2, 2, 'NIS', EX_HEAD);
+        exGabung(ws, h1, 3, h2, 3, 'Nama Peserta Didik', EX_HEAD); exGabung(ws, h1, 4, h2, 4, 'L/P', EX_HEAD);
+        if (nP) { exGabung(ws, h1, 5, h1, cR - 1, 'Penilaian Harian (PH)', EX_HEAD); ph.forEach((p, j) => exSel(ws, h2, 5 + j, 'PH-' + (j + 1), EX_HEAD)); }
+        [['Rata-rata PH'], ['PTS'], ['PAS'], ['Nilai Rapor'], ['Ketuntasan']].forEach(([t], j) => exGabung(ws, h1, cR + j, h2, cR + j, t, EX_HEAD));
+        ws.getRow(h1).height = 20; ws.getRow(h2).height = 20;
+
+        const r0 = h2 + 1, rEnd = r0 + stds.length - 1;
+        const stNilai = (v, zebra, extra) => Object.assign({ align: 'center', border: true, size: 9, fill: zebra ? EXW.zebra : undefined, color: v !== null && v !== '' && v < kktp ? EXW.merah : undefined }, extra || {});
+        stds.forEach((s, i) => {
+            const rr = r0 + i, zebra = i % 2 === 1;
+            exSiswa(ws, rr, i, s, zebra);
+            const vals = ph.map(p => p.nilai[s.StudentID]);
+            vals.forEach((v, j) => exSel(ws, rr, 5 + j, v === null ? '' : v, stNilai(v, zebra)));
+            const ada = vals.filter(v => v !== null);
+            const rata = ada.length ? Math.round(ada.reduce((a, b) => a + b, 0) / ada.length * 10) / 10 : '';
+            exSel(ws, rr, cR, nP ? { formula: `IFERROR(ROUND(AVERAGE(${exKol(5)}${rr}:${exKol(cR - 1)}${rr}),1),"")`, result: rata } : '', stNilai(rata, zebra, { fmt: '0.0' }));
+            const vPts = pts(s.StudentID), vPas = pas(s.StudentID);
+            exSel(ws, rr, cR + 1, vPts === null ? '' : vPts, stNilai(vPts, zebra));
+            exSel(ws, rr, cR + 2, vPas === null ? '' : vPas, stNilai(vPas, zebra));
+            const nr = exNilaiRapor(cid, s.StudentID, mapel, semester, tapel);
+            exSel(ws, rr, cR + 3, nr === null ? '' : nr, stNilai(nr, zebra, { b: true }));
+            const tuntas = nr === null ? '' : (nr >= kktp ? 'Tuntas' : 'Belum Tuntas');
+            exSel(ws, rr, cR + 4, tuntas, { align: 'center', border: true, size: 9, b: true, color: tuntas === 'Tuntas' ? EXW.hijau : EXW.merah, fill: tuntas === 'Tuntas' ? EXW.tuntas : tuntas ? EXW.belum : (zebra ? EXW.zebra : undefined) });
+        });
+
+        // Statistik kelas
+        const stat = [['Rata-rata Kelas', 'AVERAGE', '0.0'], ['Nilai Tertinggi', 'MAX', undefined], ['Nilai Terendah', 'MIN', undefined]];
+        stat.forEach(([label, fn, fmt], j) => {
+            const rr = rEnd + 1 + j;
+            exGabung(ws, rr, 1, rr, 4, label, { b: true, align: 'right', border: true, fill: EXW.kepala, size: 9 });
+            for (let x = 5; x <= cR + 3; x++) {
+                const k = exKol(x);
+                const nums = []; for (let q = r0; q <= rEnd; q++) { const v = ws.getCell(q, x).value; const n = typeof v === 'object' && v ? exNum(v.result) : exNum(v); if (n !== null) nums.push(n); }
+                const res = !nums.length ? '' : fn === 'AVERAGE' ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length * 10) / 10 : fn === 'MAX' ? Math.max(...nums) : Math.min(...nums);
+                exSel(ws, rr, x, { formula: `IFERROR(ROUND(${fn}(${k}${r0}:${k}${rEnd}),1),"")`, result: res }, { b: true, align: 'center', border: true, fill: EXW.kepala, size: 9, fmt });
+            }
+            exSel(ws, rr, cR + 4, '', { border: true, fill: EXW.kepala });
+        });
+        const rT = rEnd + 4;
+        const jmlTuntas = stds.filter(s => { const n = exNilaiRapor(cid, s.StudentID, mapel, semester, tapel); return n !== null && n >= kktp; }).length;
+        exGabung(ws, rT, 1, rT, 4, 'Jumlah Tuntas', { b: true, align: 'right', border: true, fill: EXW.kepala, size: 9 });
+        exGabung(ws, rT, 5, rT, lastCol, `${jmlTuntas} dari ${stds.length} peserta didik (${stds.length ? Math.round(jmlTuntas / stds.length * 100) : 0}%)`, { b: true, border: true, fill: EXW.kepala, size: 9 });
+
+        // Keterangan
+        let rk = rT + 2;
+        exGabung(ws, rk++, 1, rk - 1, lastCol, 'Keterangan:', { b: true, size: 9 });
+        // Keterangan PH ringkas: beberapa butir per baris
+        const perBaris = nP > 6 ? 3 : 2;
+        for (let j = 0; j < nP; j += perBaris) {
+            const teks = ph.slice(j, j + perBaris).map((p, x) => `PH-${j + x + 1}: ${p.tgl ? exTglIso(p.tgl) : '-'}${p.cakupan ? ' (' + p.cakupan + ')' : ''}`).join('      ');
+            exGabung(ws, rk, 1, rk, lastCol, teks, { size: 9 }); rk++;
+        }
+        exGabung(ws, rk++, 1, rk - 1, lastCol, 'PTS = Penilaian Tengah Semester, PAS = Penilaian Akhir Semester. Nilai berwarna merah berada di bawah KKTP (' + kktp + ').', { size: 9, i: true, color: EXW.abu });
+        let ketRapor = 'Nilai Rapor = rata-rata dari Rata-rata PH, PTS, dan PAS yang sudah terisi.';
+        if (olahRec) { try { const st = JSON.parse(olahRec.Pengaturan || '{}'); const b = st.bobot || {}; ketRapor = `Nilai Rapor dari menu Pengolah Nilai (bobot PH ${b.harian || 0}%, PTS ${b.pts || 0}%, PAS ${b.pas || 0}%${b.hadir ? ', Kehadiran ' + b.hadir + '%' : ''}).`; } catch (e) { } }
+        exGabung(ws, rk++, 1, rk - 1, lastCol, ketRapor + ' Nilai Rapor sama dengan yang tercetak di rapor.', { size: 9, i: true, color: EXW.abu });
+        exTtd(ws, rk + 1, lastCol, 'Guru Mata Pelajaran');
+        exHalaman(ws, lastCol, h1, h2);
+
+        await exSimpan(wb, `Daftar Nilai ${mapel} ${kelas} - Semester ${semester === 'ganjil' ? 'Ganjil' : 'Genap'} ${tapel.replace('/', '-')}.xlsx`);
+        return true;
+    }
+
+    async function downloadNilaiExcel(semester) {
+        saveNilai(true);
+        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value;
+        if (!cid || !mapel) return Swal.fire('Error', 'Pilih kelas & mapel', 'error');
+        Swal.fire({ title: 'Menyiapkan Excel...', text: 'Daftar nilai format sekolah', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+            if (await eksporNilaiSekolah(semester)) Swal.fire({ icon: 'success', title: 'Excel siap', text: 'File daftar nilai sudah diunduh.', timer: 1800, showConfirmButton: false });
+        } catch (e) {
+            console.error('Ekspor format sekolah gagal, memakai format sederhana:', e);
+            Swal.close(); await downloadNilaiExcelSederhana(semester);
+        }
     }
 
     async function downloadNilaiPDF() {
