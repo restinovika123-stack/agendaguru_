@@ -889,6 +889,7 @@ window.AGENDA_GURU_LOADED = true;
         populateMapelSelects();
         updateProfileUI();
         switchView('beranda');
+        aturMenuPasangAplikasi();
         if (window.AGENDA_DEMO) tampilkanBannerDemo();
         else {
             setTimeout(() => cekPembaruanCodeGs(0), 1000); // pembaruan penting didahulukan dari ajakan instal
@@ -1103,6 +1104,20 @@ window.AGENDA_GURU_LOADED = true;
         if (jenis === 'android') return { judul: 'HP / Tablet Android (Chrome)', langkah: [`Ketuk menu ${chip('⋮')} di kanan atas.`, `Pilih ${chip('Instal aplikasi')} atau ${chip('Tambahkan ke layar utama')}.`, `Ketuk ${chip('Instal')}.`] };
         if (jenis === 'edge') return { judul: 'Laptop / Komputer (Edge)', langkah: [`Klik ikon instal ${chip('<i class="bi bi-plus-square"></i>')} di ujung kanan bilah alamat, atau menu ${chip('⋯')} → ${chip('Aplikasi')} → ${chip('Instal AgendaGuru')}.`, `Klik ${chip('Instal')}.`] };
         return { judul: 'Laptop / Komputer (Chrome)', langkah: [`Klik ikon instal ${chip('<i class="bi bi-download"></i>')} di ujung kanan bilah alamat, atau menu ${chip('⋮')} → ${chip('Transmisikan, simpan, dan bagikan')} → ${chip('Instal AgendaGuru')}.`, `Klik ${chip('Instal')}.`] };
+    }
+
+    // Menu "Pasang Aplikasi" di sidebar: selalu bisa dibuka (tidak bergantung pada pemberitahuan otomatis).
+    function bukaMenuPasangAplikasi() {
+        if (window.innerWidth < 992) {
+            document.getElementById('sidebar-menu')?.classList.remove('show');
+            document.getElementById('sidebar-overlay')?.classList.remove('show');
+        }
+        setTimeout(() => tawarkanInstalAplikasi(true), 150);
+    }
+    // Sembunyikan menu bila aplikasi sudah dibuka sebagai aplikasi terpasang
+    function aturMenuPasangAplikasi() {
+        const li = document.getElementById('menu-pasang-aplikasi');
+        if (li && dibukaSebagaiAplikasi()) li.style.display = 'none';
     }
 
     // paksa=true: dibuka dari menu Profil atau halaman pemasangan (selalu tampil).
