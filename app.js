@@ -105,12 +105,12 @@ window.AGENDA_GURU_LOADED = true;
     function findTableRecordInTapel(kind, tapel) {
         const same = r => String(r.TahunPelajaran || '').replace(/\s+/g, '') === String(tapel).replace(/\s+/g, '');
         if (kind === 'absen') {
-            const cid = document.getElementById('absen-kelas').value, month = document.getElementById('absen-bulan').value;
+            const cid = document.getElementById('absen-kelas').value, month = absenBulanAktif();
             return db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && same(a));
         }
         const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value,
-            jenis = document.getElementById('nilai-jenis').value, bulan = document.getElementById('nilai-bulan').value;
-        if (jenis !== 'Formatif') return null;
+            jenis = document.getElementById('nilai-jenis').value, bulan = nilaiPilih ? nilaiPilih.m : '';
+        if (jenis !== 'Formatif' || !bulan) return null;
         return db.grades.find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) &&
             String(g.Type) === 'Formatif' && String(g.MonthYear) === String(bulan) && same(g));
     }
@@ -564,10 +564,10 @@ window.AGENDA_GURU_LOADED = true;
         const d = buatDataContoh_();
         return {
             classes: d.classes, students: d.students, attendance: d.attendance, grades: d.grades, koku: d.koku, ekskul: d.ekskul,
-            journal: d.journal, schedule: d.schedule, poin: d.poin, raporNotes: d.raporNotes, nilaiAkhir: d.nilaiAkhir, subjects: d.subjects,
+            journal: d.journal, schedule: d.schedule, poin: d.poin, raporNotes: d.raporNotes, nilaiAkhir: d.nilaiAkhir, subjects: d.subjects, jadwalGuru: [],
             tpBank: JSON.parse(JSON.stringify(DEFAULT_TP_BANK)),
             config: Object.assign({}, d.config, {
-                registeredEmail: 'demo@agendaguru.id', userName: 'Guru Demo, S.Pd.', demoVersi: DEMO_VERSI, demoTapel: d.tapel
+                registeredEmail: 'demo@agendaguru.id', userName: 'Guru Demo, S.Pd.', demoVersi: DEMO_VERSI, demoTapel: d.tapel, formatRapor: 'panduan', jenjang: 'SD'
             })
         };
     }
@@ -629,6 +629,8 @@ window.AGENDA_GURU_LOADED = true;
             if (!db.ekskul) db.ekskul = [];
             if (!db.raporNotes) db.raporNotes = [];
             if (!db.nilaiAkhir) db.nilaiAkhir = []; // hasil Pengolah Nilai
+            if (!db.jadwalGuru) db.jadwalGuru = []; // guru pengampu per jadwal (sheet X_jadwalGuru)
+            if (db.config && !db.config.formatRapor) db.config.formatRapor = ((db.students || []).length || (db.grades || []).length) ? 'lama' : 'panduan';
             if (!db.students) db.students = [];
 
             // Pastikan atribut identitas siswa selalu terdefinisi dengan aman (dan bertipe teks)
@@ -1291,11 +1293,11 @@ window.AGENDA_GURU_LOADED = true;
         if (viewId === 'kelas') switchKelasTab('siswa');
         if (viewId === 'absensi') loadAbsensiData();
         if (viewId === 'nilai') loadNilaiData();
-        if (viewId === 'kokurikuler') { switchKokuTab('input'); renderKokuDimensi(); loadKokuHistory(); }
-        if (viewId === 'ekstrakurikuler') { switchEkskulTab('input'); loadEkskulData(); }
-        if (viewId === 'jurnal') { switchJurnalTab('input'); renderJurnal(); if (document.getElementById('jurnal-date')) document.getElementById('jurnal-date').value = tanggalHariIni(); }
+        if (viewId === 'kokurikuler') { switchKokuTab('input'); loadKokuHistory(); }
+        if (viewId === 'ekstrakurikuler') { loadEkskulData(); switchEkskulTab('input'); }
+        if (viewId === 'jurnal') { switchJurnalTab('input'); renderJurnal(); }
         if (viewId === 'jadwal') renderSchedule();
-        if (viewId === 'poin') { switchPoinTab('input'); loadPoinData(); if (document.getElementById('poin-tanggal')) document.getElementById('poin-tanggal').value = tanggalHariIni(); }
+        if (viewId === 'poin') { if (document.getElementById('poin-tanggal') && !document.getElementById('poin-tanggal').value) document.getElementById('poin-tanggal').value = tanggalHariIni(); switchPoinTab('input'); }
         if (viewId === 'rapor') loadRaporViewData();
         if (viewId === 'pengolah') loadPengolahView();
         if (viewId === 'rekap') loadRekapView();
@@ -1305,6 +1307,13 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // --- Data Population Helpers ---
+    const KELAS_INGAT_KEY = 'agendaGuru_kelasTerakhir';
+    document.addEventListener('change', e => {
+        const id = e.target && e.target.id;
+        if (['absen-kelas', 'nilai-kelas', 'koku-kelas', 'koku-riwayat-kelas', 'poin-kelas', 'ekskul-kelas', 'filter-sched-class'].includes(id) && e.target.value && e.target.value !== 'All') {
+            try { localStorage.setItem(KELAS_INGAT_KEY, e.target.value); } catch (err) { }
+        }
+    });
     function populateClassSelects() {
         // Untuk pilihan Manajemen Kelas yang hanya menampilkan kelas spesifik (tanpa "Semua Kelas")
         let optsManajemen = '<option value="">-- Pilih Kelas --</option>';
@@ -1354,14 +1363,19 @@ window.AGENDA_GURU_LOADED = true;
         });
 
         // Menu yang datanya selalu per kelas (absensi, nilai, kokurikuler, input poin): tanpa "Semua Kelas"
+        const kelasIngat = (() => { try { return localStorage.getItem(KELAS_INGAT_KEY) || ''; } catch (e) { return ''; } })();
+        const kelasAwal = db.classes.some(c => String(c.ClassID) === kelasIngat) ? kelasIngat : (db.classes[0] ? String(db.classes[0].ClassID) : '');
         ['absen-kelas', 'nilai-kelas', 'koku-kelas', 'koku-riwayat-kelas', 'poin-kelas'].forEach(id => {
             let el = document.getElementById(id);
             if (el) {
                 let val = el.value;
                 el.innerHTML = optsManajemen;
                 if (val && val !== 'All') el.value = val;
+                if (!el.value && kelasAwal) el.value = kelasAwal;
             }
         });
+        const elEk = document.getElementById('ekskul-kelas');
+        if (elEk && kelasIngat && db.classes.some(c => String(c.ClassID) === kelasIngat) && !elEk.dataset.diingat) { elEk.value = kelasIngat; elEk.dataset.diingat = '1'; }
     }
 
     function populateMapelSelects() {
@@ -1544,7 +1558,7 @@ window.AGENDA_GURU_LOADED = true;
                 // ID harus unik: setelah ada kelas yang dihapus, "C" + jumlah kelas bisa bentrok dengan ID yang masih dipakai
                 let n = db.classes.length + 1;
                 while (db.classes.some(c => String(c.ClassID) === 'C' + n)) n++;
-                db.classes.push({ ClassID: "C" + n, ClassName: result.value }); populateClassSelects(); syncDB();
+                db.classes.push({ ClassID: "C" + n, ClassName: result.value }); populateClassSelects(); syncDB(); kelasPilih("C" + n);
                 Swal.fire('Tersimpan!', `Kelas ${result.value} berhasil ditambahkan.`, 'success');
             }
         });
@@ -2010,185 +2024,399 @@ window.AGENDA_GURU_LOADED = true;
         reader.readAsArrayBuffer(file);
     }
 
-    function renderStudentsTable() {
-        const cid = document.getElementById('select-kelas-manajemen').value;
-        const tbody = document.getElementById('table-students-body');
-        const btnDeleteClass = document.getElementById('btn-hapus-kelas');
-        const searchInput = document.getElementById('search-student-manajemen');
-        const query = (searchInput?.value || '').toLowerCase().trim();
-
-        if (!cid || cid === 'All') {
-            if (btnDeleteClass) btnDeleteClass.style.display = 'none';
-            return tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Pilih kelas terlebih dahulu</td></tr>';
-        }
-        if (btnDeleteClass) btnDeleteClass.style.display = 'inline-block';
-
-        let stds = db.students.filter(s => String(s.ClassID) === String(cid));
-
-        if (query) {
-            stds = stds.filter(s => 
-                (s.StudentName && s.StudentName.toLowerCase().includes(query)) ||
-                (s.NIS && String(s.NIS).toLowerCase().includes(query)) ||
-                (s.NISN && String(s.NISN).toLowerCase().includes(query)) ||
-                (s.ParentPhone && String(s.ParentPhone).includes(query))
-            );
-        }
-
-        if (stds.length === 0) {
-            return tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">${query ? 'Tidak ada siswa yang cocok dengan pencarian.' : 'Belum ada siswa di kelas ini.'}</td></tr>`;
-        }
-
-        let html = '';
-        stds.forEach((s, i) => {
-            const nis = s.NIS || '-';
-            const nisn = s.NISN || '-';
-            const jkBadge = s.JenisKelamin === 'P' ? '<span class="badge bg-danger-subtle text-danger border border-danger-subtle">P</span>' : '<span class="badge bg-primary-subtle text-primary border border-primary-subtle">L</span>';
-            const phoneText = s.ParentPhone ? `<a href="https://wa.me/${encodeURIComponent(String(s.ParentPhone).replace(/\D/g, '').replace(/^0/, '62'))}" target="_blank" rel="noopener" class="text-decoration-none text-success small"><i class="bi bi-whatsapp"></i> ${escapeHtml(s.ParentPhone)}</a>` : '<small class="text-muted fst-italic">Belum ada no. WA</small>';
-            const ortuName = s.NamaAyah || s.NamaIbu || s.NamaWali || '-';
-            const chkDisabled = s.ParentPhone ? '' : 'disabled';
-
-            html += `<tr>
-                <td class="text-center align-middle"><input type="checkbox" class="chk-std form-check-input" value="${s.StudentID}" ${chkDisabled}></td>
-                <td class="text-center align-middle">${i + 1}</td>
-                <td class="align-middle">
-                    <span class="fw-bold text-dark">${escapeHtml(s.StudentName)}</span>
-                    ${s.TempatLahir ? `<br><small class="text-muted" style="font-size:0.75rem;"><i class="bi bi-geo-alt"></i> ${escapeHtml(s.TempatLahir)}</small>` : ''}
-                </td>
-                <td class="align-middle small">
-                    <div><span class="text-muted">NIS:</span> <b>${escapeHtml(nis)}</b></div>
-                    <div><span class="text-muted">NISN:</span> <b>${escapeHtml(nisn)}</b></div>
-                </td>
-                <td class="text-center align-middle">${jkBadge}</td>
-                <td class="align-middle small">
-                    <div class="text-dark fw-semibold">${escapeHtml(ortuName)}</div>
-                    <div>${phoneText}</div>
-                </td>
-                <td class="text-center align-middle text-nowrap">
-                    <button class="btn btn-sm btn-outline-info me-1 mb-1" onclick="viewStudentDetail('${s.StudentID}')" title="Detail Siswa"><i class="bi bi-eye"></i></button>
-                    <button class="btn btn-sm btn-outline-primary me-1 mb-1" onclick="editStudent('${s.StudentID}')" title="Edit Siswa"><i class="bi bi-pencil-square"></i></button>
-                    <button class="btn btn-sm btn-outline-success me-1 mb-1" onclick="openRaporForStudent('${s.StudentID}')" title="Buka Rapor"><i class="bi bi-printer"></i></button>
-                    <button class="btn btn-sm btn-outline-danger mb-1" onclick="deleteStudent('${s.StudentID}')" title="Hapus Siswa"><i class="bi bi-trash"></i></button>
-                </td>
-            </tr>`;
-        });
-        tbody.innerHTML = html;
+    // =====================================================================
+    // MANAJEMEN KELAS — kartu kelas, daftar siswa yang bisa diketuk, panel detail berlabel.
+    // Pilihan kelas tetap tersimpan di <select id="select-kelas-manajemen"> (tersembunyi) agar
+    // fungsi lain (tambah siswa, impor Excel, hapus kelas) tetap bekerja seperti sebelumnya.
+    // =====================================================================
+    let kelasDetailId = null, kelasModePilih = false;
+    function kelasPilih(cid) {
+        const sel = document.getElementById('select-kelas-manajemen'); if (!sel) return;
+        sel.value = cid; kelasDetailId = null; kelasModePilih = false;
+        try { localStorage.setItem(KELAS_INGAT_KEY, cid); } catch (e) { }
+        renderStudentsTable();
     }
-
+    function kelasRingkasSiswa(s) {
+        const tp = getActiveTapel(); let h = 0, n = 0;
+        db.attendance.filter(a => String(a.ClassID) === String(s.ClassID) && matchTapel(a, tp)).forEach(a => {
+            const { dates, att } = absenBaca(a);
+            (att[s.StudentID] || []).slice(0, dates.length).forEach(v => { if (['H', 'S', 'I', 'A'].includes(v)) { n++; if (v === 'H') h++; } });
+        });
+        const nums = [];
+        db.grades.filter(g => String(g.ClassID) === String(s.ClassID) && matchTapel(g, tp)).forEach(g => {
+            let gd = {}; try { gd = JSON.parse(g.GradesData || '{}'); } catch (e) { }
+            (gd[s.StudentID] || []).forEach(v => { const x = parseFloat(v); if (agIsiNilai(v) && !isNaN(x)) nums.push(x); });
+        });
+        const poin = (db.poin || []).filter(p => String(p.StudentID) === String(s.StudentID)).reduce((t, p) => t + (Number(p.PoinReward) || 0) - (Number(p.PoinPelanggaran) || 0), 0);
+        return { hadir: n ? Math.round(h / n * 100) + '%' : '-', nilai: nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1).replace('.', ',') : '-', poin: (poin > 0 ? '+' : '') + poin };
+    }
+    function renderStudentsTable() {
+        const sel = document.getElementById('select-kelas-manajemen'), box = document.getElementById('kelas-konten'); if (!sel || !box) return;
+        let cid = sel.value;
+        if ((!cid || cid === 'All') && db.classes.length) {
+            let ingat = ''; try { ingat = localStorage.getItem(KELAS_INGAT_KEY) || ''; } catch (e) { }
+            cid = db.classes.some(c => String(c.ClassID) === ingat) ? ingat : String(db.classes[0].ClassID); sel.value = cid;
+        }
+        const jml = c => db.students.filter(s => String(s.ClassID) === String(c.ClassID)).length;
+        let html = `<div class="ag-classgrid">${db.classes.map(c => {
+            const on = String(c.ClassID) === String(cid);
+            return `<button type="button" class="ag-pcard ag-classcard${on ? ' on' : ''}" aria-pressed="${on}" onclick="kelasPilih('${escapeHtml(c.ClassID)}')"><b>${escapeHtml(c.ClassName)}</b><small>${jml(c)} siswa</small></button>`;
+        }).join('')}<button type="button" class="ag-pcard ag-pcard-new" onclick="showAddClassModal()"><i class="bi bi-plus-lg"></i> Kelas baru</button></div>`;
+        if (!cid) { box.innerHTML = html + '<div class="card-custom"><div class="card-body"><div class="ag-empty"><i class="bi bi-people"></i><p>Belum ada kelas. Buat kelas pertama Anda.</p></div></div></div>'; return; }
+        const q = (document.getElementById('search-student-manajemen')?.value || '').toLowerCase().trim();
+        const semua = db.students.filter(s => String(s.ClassID) === String(cid));
+        const stds = semua.filter(s => !q || [s.StudentName, s.NIS, s.NISN, s.ParentPhone].some(v => v && String(v).toLowerCase().includes(q)));
+        const L = semua.filter(s => s.JenisKelamin !== 'P').length;
+        if (kelasDetailId && !semua.some(s => s.StudentID === kelasDetailId)) kelasDetailId = null;
+        html += `<div class="ag-split"><div class="card-custom ag-split-main"><div class="card-body ag-panel">
+            <div class="ag-toolbar">
+                <label class="ag-search"><i class="bi bi-search"></i><span class="visually-hidden">Cari siswa</span>
+                    <input type="search" id="search-student-manajemen" placeholder="Cari nama, NIS, atau no. HP" value="${escapeHtml(q)}" oninput="renderStudentsTable(); const el=document.getElementById('search-student-manajemen'); el.focus(); el.setSelectionRange(el.value.length, el.value.length);"></label>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="showAddStudentModal()"><i class="bi bi-person-plus"></i> Tambah siswa</button>
+                <button type="button" class="ag-btn" onclick="showUploadExcelModal()"><i class="bi bi-upload"></i> Impor dari Excel</button>
+                <button type="button" class="ag-btn ag-btn-wa" onclick="kelasModePilih = !kelasModePilih; renderStudentsTable()" aria-pressed="${kelasModePilih}"><i class="bi bi-whatsapp"></i> ${kelasModePilih ? 'Batal pilih' : 'Kirim WA ke orang tua'}</button>
+            </div>
+            <div class="ag-steprow"><span class="ag-hint">${semua.length} siswa · ${L} laki-laki · ${semua.length - L} perempuan</span>
+                <button type="button" class="ag-linkbtn ag-danger" onclick="deleteClass()">Hapus kelas ini</button></div>`;
+        if (kelasModePilih) {
+            html += `<div class="ag-banner ag-banner-ok"><i class="bi bi-whatsapp"></i><span>Centang siswa yang orang tuanya akan dikirimi pesan (hanya yang punya no. HP).</span>
+                <button type="button" class="ag-linkbtn" onclick="document.querySelectorAll('.chk-std:not(:disabled)').forEach(c => c.checked = true)">Pilih semua</button>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="openBroadcastModal()">Lanjut tulis pesan</button></div>`;
+        }
+        html += '<div class="ag-list" role="list">';
+        if (!stds.length) html += `<p class="ag-empty mb-0">${q ? 'Tidak ada siswa yang cocok dengan pencarian.' : 'Belum ada siswa di kelas ini. Ketuk "Tambah siswa" atau "Impor dari Excel".'}</p>`;
+        stds.forEach(s => {
+            const on = s.StudentID === kelasDetailId, ortu = s.NamaAyah || s.NamaIbu || s.NamaWali || '-', sid = escapeHtml(s.StudentID);
+            const ini = String(s.StudentName || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+            html += `<div class="ag-studentrow${on ? ' on' : ''}" role="listitem">
+                ${kelasModePilih ? `<input type="checkbox" class="chk-std form-check-input" value="${sid}" aria-label="Pilih ${escapeHtml(s.StudentName)}" ${s.ParentPhone ? '' : 'disabled'}>` : ''}
+                <button type="button" class="ag-studentbtn" onclick="kelasBukaDetail('${sid}')" aria-expanded="${on}">
+                    <span class="ag-avatar ${s.JenisKelamin === 'P' ? 'p' : 'l'}">${escapeHtml(ini)}</span>
+                    <span class="ag-studentmain"><b>${escapeHtml(s.StudentName)}</b><small>NIS ${escapeHtml(s.NIS || '-')} · ${s.JenisKelamin === 'P' ? 'Perempuan' : 'Laki-laki'}</small></span>
+                    <span class="ag-studentortu">${escapeHtml(ortu)}${s.ParentPhone ? `<small><i class="bi bi-whatsapp"></i> ${escapeHtml(s.ParentPhone)}</small>` : '<small class="text-muted">Belum ada no. HP</small>'}</span>
+                    <i class="bi bi-chevron-right ag-chev" aria-hidden="true"></i></button></div>`;
+        });
+        html += '</div></div></div>';
+        // Panel detail
+        const d = semua.find(s => s.StudentID === kelasDetailId);
+        html += `<div class="ag-detailpanel${d ? ' open' : ''}" id="kelas-detail">`;
+        if (d) {
+            const r = kelasRingkasSiswa(d), sid = escapeHtml(d.StudentID);
+            const ttl = (d.TempatLahir ? d.TempatLahir + ', ' : '') + (d.TanggalLahir ? formatTanggalIndo(d.TanggalLahir) : '-');
+            html += `<div class="card-custom"><div class="card-body ag-panel">
+                <div class="ag-detailhead"><span class="ag-avatar lg ${d.JenisKelamin === 'P' ? 'p' : 'l'}">${escapeHtml(String(d.StudentName || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase())}</span>
+                    <div class="flex-grow-1"><b>${escapeHtml(d.StudentName)}</b><small>${escapeHtml(jadwalKelasNama(d.ClassID))}</small></div>
+                    <button type="button" class="ag-iconbtn ag-iconbtn-sm" onclick="kelasDetailId=null; renderStudentsTable()" aria-label="Tutup detail"><i class="bi bi-x-lg"></i></button></div>
+                <dl class="ag-dl">
+                    <dt>NIS / NISN</dt><dd>${escapeHtml(d.NIS || '-')} / ${escapeHtml(d.NISN || '-')}</dd>
+                    <dt>Jenis kelamin</dt><dd>${d.JenisKelamin === 'P' ? 'Perempuan' : 'Laki-laki'}</dd>
+                    <dt>Agama</dt><dd>${escapeHtml(d.Agama || '-')}</dd>
+                    <dt>Tempat, tgl lahir</dt><dd>${escapeHtml(ttl)}</dd>
+                    <dt>Alamat</dt><dd>${escapeHtml(d.Alamat || '-')}</dd>
+                    <dt>Ayah / Ibu</dt><dd>${escapeHtml(d.NamaAyah || '-')} / ${escapeHtml(d.NamaIbu || '-')}</dd>
+                    ${d.NamaWali ? `<dt>Wali</dt><dd>${escapeHtml(d.NamaWali)}</dd>` : ''}
+                    <dt>No. HP ortu</dt><dd>${escapeHtml(d.ParentPhone || '-')}</dd>
+                </dl>
+                <div class="ag-btngrid">
+                    <button type="button" class="ag-btn ag-btn-primary" onclick="editStudent('${sid}')"><i class="bi bi-pencil-square"></i> Ubah data</button>
+                    <button type="button" class="ag-btn" onclick="openRaporForStudent('${sid}')"><i class="bi bi-printer"></i> Buka rapor</button>
+                    <button type="button" class="ag-btn ag-btn-wa" onclick="kelasWA('${sid}')"><i class="bi bi-whatsapp"></i> WhatsApp ortu</button>
+                    <button type="button" class="ag-btn ag-btn-danger-outline" onclick="deleteStudent('${sid}')"><i class="bi bi-trash"></i> Hapus siswa</button>
+                </div>
+                <div class="ag-sum3 ag-sum3-mini">
+                    <div class="ag-sumbox st-H"><b>${r.hadir}</b><span>Kehadiran</span></div>
+                    <div class="ag-sumbox st-S"><b>${r.nilai}</b><span>Rata-rata nilai</span></div>
+                    <div class="ag-sumbox st-I"><b>${r.poin}</b><span>Poin</span></div>
+                </div>
+                <p class="ag-hint mb-0">Ringkasan TP ${escapeHtml(getActiveTapel())}.</p>
+            </div></div>`;
+        } else {
+            html += `<div class="card-custom ag-detail-empty"><div class="card-body"><div class="ag-empty"><i class="bi bi-person-badge"></i><p>Ketuk nama siswa untuk melihat data lengkap dan tombol Ubah, Rapor, WhatsApp, atau Hapus.</p></div></div></div>`;
+        }
+        html += '</div></div>';
+        box.innerHTML = html;
+    }
+    function kelasBukaDetail(sid) { kelasDetailId = kelasDetailId === sid ? null : sid; renderStudentsTable(); }
+    function kelasWA(sid) {
+        const s = db.students.find(x => x.StudentID === sid);
+        if (!s || !s.ParentPhone) return Swal.fire('Nomor belum ada', 'Nomor HP orang tua belum diisi. Ketuk "Ubah data" untuk menambahkannya.', 'info');
+        let phone = String(s.ParentPhone).replace(/\D/g, ''); if (phone.startsWith('0')) phone = '62' + phone.slice(1);
+        const a = document.createElement('a'); a.target = '_blank'; a.rel = 'noopener'; a.href = 'https://api.whatsapp.com/send?phone=' + phone;
+        document.body.appendChild(a); a.click(); a.remove();
+    }
     function deleteStudent(studentId) {
-        Swal.fire({ title: 'Hapus Siswa?', text: "Yakin ingin menghapus?", icon: 'warning', showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, Hapus!' }).then((result) => {
-            if (result.isConfirmed) { db.students = db.students.filter(s => s.StudentID !== studentId); syncDB(); renderStudentsTable(); Swal.fire('Terhapus!', 'Data dihapus.', 'success'); }
+        const s = db.students.find(x => x.StudentID === studentId);
+        Swal.fire({ title: 'Hapus siswa?', text: `${s ? s.StudentName : 'Siswa ini'} akan dihapus dari kelas.`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal' }).then(result => {
+            if (!result.isConfirmed) return;
+            db.students = db.students.filter(x => x.StudentID !== studentId);
+            if (kelasDetailId === studentId) kelasDetailId = null;
+            syncDB(); renderStudentsTable();
+            Swal.fire({ icon: 'success', title: 'Terhapus', timer: 1200, showConfirmButton: false });
         });
     }
 
     // --- Absensi ---
+    // =====================================================================
+    // ABSENSI — "Input Harian" (satu tanggal, daftar ke bawah) + "Rekap Bulanan"
+    // Struktur data TIDAK berubah: db.attendance per kelas + bulan + TP, berisi
+    // DatesData [tanggal kolom] dan AttendanceData { StudentID: [status per kolom] }.
+    // =====================================================================
+    const AG_STATUS = [{ k: 'H', label: 'Hadir' }, { k: 'S', label: 'Sakit' }, { k: 'I', label: 'Izin' }, { k: 'A', label: 'Alpha' }];
+    const AG_NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const AG_HARI_PENDEK = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+    function agTglHariIni() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function agGeserTgl(iso, n) {
+        const p = String(iso).split('-').map(Number); const d = new Date(p[0], p[1] - 1, p[2] + n);
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function agHariKe(iso) { const p = String(iso).split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]).getDay(); }
+    function agTglPendek(iso) { if (!iso) return 'Tanpa tanggal'; const p = iso.split('-'); return Number(p[2]) + ' ' + AG_NAMA_BULAN[Number(p[1]) - 1].slice(0, 3); }
+    function agIsiNilai(v) { return v !== undefined && v !== null && String(v).trim() !== ''; }
+
+    let absenMode = 'harian';            // 'harian' | 'rekap'
+    let absenTanggal = agTglHariIni();
+    let absenCari = '';
+
+    function absenSiswa(cid) { return db.students.filter(s => String(s.ClassID) === String(cid)); }
+    function absenCariRec(cid, month) {
+        return db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && matchTapel(a, getActiveTapel()));
+    }
+    function absenBaca(rec) {
+        let dates = [], att = {};
+        if (rec) { try { dates = JSON.parse(rec.DatesData) || []; } catch (e) { } try { att = JSON.parse(rec.AttendanceData) || {}; } catch (e) { } }
+        if (!Array.isArray(dates)) dates = [];
+        if (!att || typeof att !== 'object') att = {};
+        return { dates, att };
+    }
+    function absenTulis(rec, dates, att) {
+        rec.DatesData = JSON.stringify(dates); rec.AttendanceData = JSON.stringify(att);
+        rec.TahunPelajaran = rec.TahunPelajaran || getActiveTapel();
+    }
+    function absenBulanAktif() {
+        return absenMode === 'rekap' ? document.getElementById('absen-bulan').value : absenTanggal.slice(5, 7);
+    }
+    // Pastikan ada kolom untuk tanggal ini (dibuat dengan semua siswa "H"). Kolom disisipkan urut tanggal.
+    function absenPastikanKolom(cid, tgl) {
+        const month = tgl.slice(5, 7);
+        let rec = absenCariRec(cid, month);
+        if (!rec) {
+            rec = { RecordID: 'A' + Date.now(), ClassID: cid, MonthYear: month, TahunPelajaran: getActiveTapel(), DatesData: '[]', AttendanceData: '{}' };
+            db.attendance.push(rec);
+        }
+        const { dates, att } = absenBaca(rec);
+        let idx = dates.indexOf(tgl);
+        if (idx >= 0) return { rec, idx };
+        const n = dates.length;
+        idx = dates.findIndex(d => !d || d > tgl); if (idx < 0) idx = n;
+        dates.splice(idx, 0, tgl);
+        const kelas = new Set(absenSiswa(cid).map(s => String(s.StudentID)));
+        new Set([...Object.keys(att), ...kelas]).forEach(sid => {
+            const row = Array.isArray(att[sid]) ? att[sid].slice(0, n) : [];
+            while (row.length < n) row.push('-');
+            row.splice(idx, 0, kelas.has(String(sid)) ? 'H' : '-');
+            att[sid] = row;
+        });
+        absenTulis(rec, dates, att);
+        return { rec, idx };
+    }
+    function absenSetMode(m) { if (m === 'rekap' && absenMode !== 'rekap') document.getElementById('absen-bulan').value = absenTanggal.slice(5, 7); absenMode = m; loadAbsensiData(); }
+    function absenKeTanggal(tgl) { if (!tgl) return; absenTanggal = tgl; absenMode = 'harian'; loadAbsensiData(); }
+    function absenGeserHari(n) { absenKeTanggal(agGeserTgl(absenTanggal, n)); }
+
     function loadAbsensiData() {
-        const cid = document.getElementById('absen-kelas').value, month = document.getElementById('absen-bulan').value;
-        if (!cid) { document.getElementById('absensi-chart-container').style.display = 'none'; return; }
-
-        const stds = db.students.filter(s => String(s.ClassID) === String(cid));
-        const record = db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && matchTapel(a, getActiveTapel()));
-
-        let savedDates = [], savedAttendance = {};
-        if (record) { try { savedDates = JSON.parse(record.DatesData); savedAttendance = JSON.parse(record.AttendanceData); } catch (e) { } }
-
-        if (savedDates.length === 0) savedDates = [""];
-        let colCount = savedDates.length;
-
-        let thead = '<th>Nama Siswa</th>';
-        for (let i = 0; i < colCount; i++) {
-            thead += `<th><input type="date" class="date-input-header date-absen-col" data-idx="${i}" value="${savedDates[i] || ""}" onchange="saveAbsensi(true)">
-                    ${colCount > 1 ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 py-0 px-1" onclick="deleteAbsenColumn(${i})" title="Hapus Kolom Ini"><i class="bi bi-trash"></i></button>` : ''}
-                </th>`;
+        const cid = document.getElementById('absen-kelas').value;
+        const box = document.getElementById('absen-konten');
+        document.getElementById('absen-tab-harian').classList.toggle('active', absenMode === 'harian');
+        document.getElementById('absen-tab-rekap').classList.toggle('active', absenMode === 'rekap');
+        document.getElementById('absen-tab-harian').setAttribute('aria-selected', absenMode === 'harian');
+        document.getElementById('absen-tab-rekap').setAttribute('aria-selected', absenMode === 'rekap');
+        document.getElementById('absen-bulan-wrap').style.display = absenMode === 'rekap' ? '' : 'none';
+        if (!cid) {
+            box.innerHTML = '<div class="alert alert-secondary text-center mb-0">Pilih kelas terlebih dahulu.</div>';
+            return;
         }
-        document.getElementById('absen-thead').innerHTML = thead;
+        if (!absenSiswa(cid).length) {
+            box.innerHTML = '<div class="alert alert-secondary text-center mb-0">Belum ada siswa di kelas ini. Tambahkan siswa di menu Manajemen Kelas.</div>';
+            return;
+        }
+        if (absenMode === 'rekap') renderAbsenRekap(cid); else renderAbsenHarian(cid);
+        renderChartAbsensi();
+    }
 
-        let tbody = '';
-        stds.forEach(s => {
-            tbody += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${escapeHtml(s.StudentName)}
-                <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="sendWAAbsen('${s.StudentID}')" title="Kirim WA Orang Tua"><i class="bi bi-whatsapp"></i></button>
-                </td>`;
-            // Bulan yang belum pernah diisi: kolom pertama langsung "H" untuk semua siswa
-            let sAtt = savedAttendance[s.StudentID] || Array(colCount).fill(record ? '-' : 'H');
-            for (let i = 0; i < colCount; i++) {
-                let val = sAtt[i] || '-', color = val !== '-' ? `status-${val}` : '';
-                tbody += `<td><select class="status-select select-absen-val ${color}" data-sid="${s.StudentID}" data-idx="${i}" onchange="updateSelectColor(this)">
-                        <option value="H" ${val === 'H' ? 'selected' : ''}>H</option><option value="S" ${val === 'S' ? 'selected' : ''}>S</option>
-                        <option value="I" ${val === 'I' ? 'selected' : ''}>I</option><option value="A" ${val === 'A' ? 'selected' : ''}>A</option><option value="-" ${val === '-' ? 'selected' : ''}>-</option>
-                    </select></td>`;
+    function renderAbsenHarian(cid) {
+        const tgl = absenTanggal, month = tgl.slice(5, 7);
+        const rec = absenCariRec(cid, month), { dates, att } = absenBaca(rec);
+        const idx = dates.indexOf(tgl), ada = idx >= 0;
+        const stds = absenSiswa(cid);
+        const status = sid => ada ? ((att[sid] || [])[idx] || '-') : 'H';
+        const hitung = { H: 0, S: 0, I: 0, A: 0 };
+        stds.forEach(s => { const v = status(s.StudentID); if (hitung[v] !== undefined) hitung[v]++; });
+        const hariIni = agTglHariIni();
+        let tag = '', tagCls = '';
+        if (tgl === hariIni) { tag = 'Hari ini'; tagCls = 'ag-tag-today'; }
+        else if (tgl > hariIni) { tag = 'Tanggal mendatang'; tagCls = 'ag-tag-warn'; }
+        if (agHariKe(tgl) === 0) { tag = (tag ? tag + ' · ' : '') + 'Hari Minggu'; tagCls = 'ag-tag-warn'; }
+        const q = absenCari.trim().toLowerCase();
+
+        let html = `
+        <div class="ag-nav">
+            <button type="button" class="ag-iconbtn" onclick="absenGeserHari(-1)" aria-label="Hari sebelumnya"><i class="bi bi-chevron-left"></i></button>
+            <div class="ag-nav-mid">
+                <div class="ag-nav-title">${escapeHtml(formatTanggalIndo(tgl))}</div>
+                <div class="ag-nav-sub ${tagCls}">${tag ? escapeHtml(tag) : (ada ? 'Data tersimpan' : '&nbsp;')}</div>
+            </div>
+            <button type="button" class="ag-iconbtn" onclick="absenGeserHari(1)" aria-label="Hari berikutnya"><i class="bi bi-chevron-right"></i></button>
+            <div class="ag-nav-tools">
+                ${tgl !== hariIni ? '<button type="button" class="ag-btn" onclick="absenKeTanggal(agTglHariIni())">Hari ini</button>' : ''}
+                <label class="ag-btn ag-datepick" title="Pilih tanggal"><i class="bi bi-calendar3"></i><span>Pilih tanggal</span>
+                    <input type="date" value="${tgl}" onchange="absenKeTanggal(this.value)" aria-label="Pilih tanggal absensi"></label>
+            </div>
+        </div>
+        <div class="ag-sum4">
+            ${AG_STATUS.map(st => `<div class="ag-sumbox st-${st.k}"><b>${hitung[st.k]}</b><span>${st.label}</span></div>`).join('')}
+        </div>`;
+        if (ada) {
+            html += `<div class="ag-banner ag-banner-ok"><i class="bi bi-check2-circle"></i><span>Absensi tanggal ini tersimpan otomatis setiap kali Anda mengubah status.</span>
+                <button type="button" class="ag-linkbtn ag-danger" onclick="absenHapusTanggal()">Hapus absensi tanggal ini</button></div>`;
+        } else {
+            html += `<div class="ag-banner ag-banner-warn"><i class="bi bi-info-circle"></i><span><b>Belum ada absensi untuk tanggal ini.</b> Semua siswa ditampilkan Hadir. Ketuk siswa yang tidak hadir (langsung tersimpan), atau simpan semua Hadir.</span>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="absenSemuaHadir()"><i class="bi bi-check2-all"></i> Simpan: semua Hadir</button></div>`;
+        }
+        html += `<div class="ag-toolbar">
+            <label class="ag-search"><i class="bi bi-search"></i><span class="visually-hidden">Cari nama siswa</span>
+                <input type="search" placeholder="Cari nama siswa" value="${escapeHtml(absenCari)}" oninput="absenCari=this.value; absenFilterNama()"></label>
+            ${ada ? '<button type="button" class="ag-btn ag-btn-outline-success" onclick="absenSemuaHadir()"><i class="bi bi-check2-all"></i> Tandai semua Hadir</button>' : ''}
+        </div>
+        <div class="ag-list" role="list" id="absen-list">`;
+        stds.forEach((s, i) => {
+            const v = status(s.StudentID), sid = escapeHtml(s.StudentID);
+            const tampil = !q || String(s.StudentName).toLowerCase().includes(q);
+            html += `<div class="ag-row${v !== 'H' ? ' ag-row-mark' : ''}" role="listitem" data-nama="${escapeHtml(String(s.StudentName).toLowerCase())}"${tampil ? '' : ' hidden'}>
+                <span class="ag-no">${i + 1}</span>
+                <span class="ag-name">${escapeHtml(s.StudentName)}</span>
+                <div class="ag-seg" role="group" aria-label="Kehadiran ${escapeHtml(s.StudentName)}">
+                    ${AG_STATUS.map(st => `<button type="button" class="ag-st st-${st.k}${v === st.k ? ' on' : ''}" aria-pressed="${v === st.k}" aria-label="${st.label}" data-absen-btn="${sid}-${st.k}" onclick="absenSetStatus('${sid}','${st.k}')"><span class="ag-st-full">${st.label}</span><span class="ag-st-short">${st.k}</span></button>`).join('')}
+                </div>
+                <button type="button" class="ag-iconbtn ag-wa" onclick="sendWAAbsen('${sid}')" title="Kirim rekap ke WA orang tua" aria-label="Kirim rekap ke WA orang tua ${escapeHtml(s.StudentName)}"><i class="bi bi-whatsapp"></i></button>
+            </div>`;
+        });
+        html += '</div>';
+        document.getElementById('absen-konten').innerHTML = html;
+    }
+    function absenFilterNama() {
+        const q = absenCari.trim().toLowerCase();
+        document.querySelectorAll('#absen-list .ag-row').forEach(r => { r.hidden = !!q && !r.dataset.nama.includes(q); });
+    }
+    function absenSetStatus(sid, k) {
+        const cid = document.getElementById('absen-kelas').value; if (!cid) return;
+        const fokus = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.absenBtn : null;
+        const { rec, idx } = absenPastikanKolom(cid, absenTanggal);
+        const { dates, att } = absenBaca(rec);
+        const row = Array.isArray(att[sid]) ? att[sid] : [];
+        while (row.length < dates.length) row.push('-');
+        row[idx] = k; att[sid] = row;
+        absenTulis(rec, dates, att); syncDB();
+        renderAbsenHarian(cid); renderChartAbsensi();
+        if (fokus) document.querySelector(`[data-absen-btn="${CSS.escape(sid + '-' + k)}"]`)?.focus({ preventScroll: true });
+        warnTapelMismatch('absen', absenTanggal);
+    }
+    async function absenSemuaHadir() {
+        const cid = document.getElementById('absen-kelas').value; if (!cid) return;
+        const rec0 = absenCariRec(cid, absenTanggal.slice(5, 7)), b0 = absenBaca(rec0), i0 = b0.dates.indexOf(absenTanggal);
+        if (i0 >= 0) {
+            const adaLain = absenSiswa(cid).some(s => ((b0.att[s.StudentID] || [])[i0] || '-') !== 'H');
+            if (adaLain) {
+                const r = await Swal.fire({ icon: 'question', title: 'Tandai semua Hadir?', text: 'Status Sakit, Izin, dan Alpha pada tanggal ini akan diganti menjadi Hadir.', showCancelButton: true, confirmButtonText: 'Ya, semua Hadir', cancelButtonText: 'Batal' });
+                if (!r.isConfirmed) return;
             }
-            tbody += `</tr>`;
-        });
-        document.getElementById('absen-tbody').innerHTML = tbody; document.getElementById('absensi-chart-container').style.display = 'block'; renderChartAbsensi();
-    }
-
-    function addAbsenColumn() {
-        const cid = document.getElementById('absen-kelas').value, month = document.getElementById('absen-bulan').value;
-        if (!cid) return Swal.fire('Error', 'Pilih kelas terlebih dahulu.', 'error');
-        saveAbsensi(true);
-        let record = db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && matchTapel(a, getActiveTapel()));
-        if (record) {
-            let dates = JSON.parse(record.DatesData); dates.push(""); record.DatesData = JSON.stringify(dates);
-            let att = JSON.parse(record.AttendanceData);
-            // Kolom baru: semua siswa di kelas langsung "H" (Hadir); guru cukup mengubah yang tidak hadir
-            db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => {
-                const row = Array.isArray(att[s.StudentID]) ? att[s.StudentID] : [];
-                while (row.length < dates.length - 1) row.push('-');
-                row.length = dates.length - 1;
-                row.push('H');
-                att[s.StudentID] = row;
-            });
-            record.AttendanceData = JSON.stringify(att); syncDB();
         }
-        loadAbsensiData();
+        const { rec, idx } = absenPastikanKolom(cid, absenTanggal);
+        const { dates, att } = absenBaca(rec);
+        absenSiswa(cid).forEach(s => { const row = Array.isArray(att[s.StudentID]) ? att[s.StudentID] : []; while (row.length < dates.length) row.push('-'); row[idx] = 'H'; att[s.StudentID] = row; });
+        absenTulis(rec, dates, att); syncDB(); loadAbsensiData();
+        warnTapelMismatch('absen', absenTanggal);
     }
-
-    function deleteAbsenColumn(idx) {
-        const cid = document.getElementById('absen-kelas').value, month = document.getElementById('absen-bulan').value;
-        if (!cid) return;
-        saveAbsensi(true); // pastikan perubahan yang belum tersimpan tidak ikut hilang
-        let record = db.attendance.find(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && matchTapel(a, getActiveTapel()));
-        if (!record) return;
-        let dates = []; try { dates = JSON.parse(record.DatesData); } catch (e) { }
-        if (dates.length <= 1) return Swal.fire('Tidak Bisa', 'Minimal harus ada 1 kolom tanggal.', 'warning');
-
+    function absenHapusTanggal() {
+        const cid = document.getElementById('absen-kelas').value; if (!cid) return;
+        const rec = absenCariRec(cid, absenTanggal.slice(5, 7)); if (!rec) return;
         Swal.fire({
-            title: 'Hapus Kolom Ini?', text: 'Seluruh data absensi pada kolom tanggal ini akan dihapus.', icon: 'warning',
-            showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, Hapus!', cancelButtonText: 'Batal'
-        }).then((result) => {
-            if (!result.isConfirmed) return;
+            title: 'Hapus absensi tanggal ini?', text: `Semua status kehadiran pada ${formatTanggalIndo(absenTanggal)} akan dihapus.`, icon: 'warning',
+            showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal'
+        }).then(r => {
+            if (!r.isConfirmed) return;
+            const { dates, att } = absenBaca(rec), idx = dates.indexOf(absenTanggal); if (idx < 0) return;
             dates.splice(idx, 1);
-            record.DatesData = JSON.stringify(dates);
-            let att = {}; try { att = JSON.parse(record.AttendanceData); } catch (e) { }
-            for (let sid in att) { att[sid].splice(idx, 1); }
-            record.AttendanceData = JSON.stringify(att);
-            syncDB(); loadAbsensiData();
-            Swal.fire('Terhapus!', 'Kolom berhasil dihapus.', 'success');
+            Object.keys(att).forEach(sid => { if (Array.isArray(att[sid])) att[sid].splice(idx, 1); });
+            absenTulis(rec, dates, att); syncDB(); loadAbsensiData();
+            Swal.fire({ icon: 'success', title: 'Terhapus', timer: 1300, showConfirmButton: false });
         });
     }
 
-    function updateSelectColor(sel) { sel.className = `status-select select-absen-val status-${sel.value}`; renderChartAbsensi(); saveAbsensi(true); }
+    function renderAbsenRekap(cid) {
+        const month = document.getElementById('absen-bulan').value;
+        const rec = absenCariRec(cid, month), { dates, att } = absenBaca(rec), stds = absenSiswa(cid);
+        const box = document.getElementById('absen-konten');
+        if (!dates.length) {
+            box.innerHTML = `<div class="ag-empty"><i class="bi bi-calendar-x"></i><p>Belum ada absensi di bulan ${AG_NAMA_BULAN[Number(month) - 1]}.</p>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="absenSetMode('harian')">Buka Input Harian</button></div>`;
+            return;
+        }
+        let html = `<div class="ag-legend">
+            ${AG_STATUS.map(st => `<span><span class="ag-cellmini st-${st.k}">${st.k}</span>${st.label}</span>`).join('')}
+            <span class="ag-legend-note">Ketuk sel untuk mengganti status. Ketuk tanggal untuk membuka Input Harian.</span></div>
+        <div class="ag-tablewrap"><table class="ag-table"><thead><tr><th scope="col" class="ag-stick-l">Nama siswa</th>`;
+        dates.forEach((d, i) => {
+            html += d
+                ? `<th scope="col"><button type="button" class="ag-datehead" onclick="absenKeTanggal('${d}')" title="Buka ${escapeHtml(formatTanggalIndo(d))}"><small>${AG_HARI_PENDEK[agHariKe(d)]}</small><b>${Number(d.slice(8, 10))}</b></button></th>`
+                : `<th scope="col"><input type="date" class="ag-dateinput" aria-label="Isi tanggal kolom ${i + 1}" onchange="absenIsiTanggalKosong(${i}, this.value)" title="Kolom ini belum bertanggal"></th>`;
+        });
+        html += '<th scope="col" class="ag-stick-r">H · S · I · A</th></tr></thead><tbody>';
+        stds.forEach(s => {
+            const row = att[s.StudentID] || [], sid = escapeHtml(s.StudentID), t = { H: 0, S: 0, I: 0, A: 0 };
+            html += `<tr><th scope="row" class="ag-stick-l"><span class="ag-namecell">${escapeHtml(s.StudentName)}<button type="button" class="ag-wa-mini" onclick="sendWAAbsen('${sid}')" title="Kirim rekap bulan ini ke WA orang tua" aria-label="Kirim rekap ke WA orang tua ${escapeHtml(s.StudentName)}"><i class="bi bi-whatsapp"></i></button></span></th>`;
+            dates.forEach((d, i) => {
+                const v = row[i] || '-'; if (t[v] !== undefined) t[v]++;
+                html += `<td><button type="button" class="ag-cell st-${v === '-' ? 'kosong' : v}" onclick="absenSiklus('${sid}', ${i})" aria-label="${escapeHtml(s.StudentName)}, ${escapeHtml(d ? formatTanggalIndo(d) : 'kolom ' + (i + 1))}: ${v}">${v}</button></td>`;
+            });
+            html += `<td class="ag-stick-r ag-total"><span class="t-H">${t.H}</span> · <span class="t-S">${t.S}</span> · <span class="t-I">${t.I}</span> · <span class="t-A">${t.A}</span></td></tr>`;
+        });
+        html += '</tbody></table></div>';
+        box.innerHTML = html;
+    }
+    function absenSiklus(sid, i) {
+        const cid = document.getElementById('absen-kelas').value, rec = absenCariRec(cid, document.getElementById('absen-bulan').value); if (!rec) return;
+        const { dates, att } = absenBaca(rec), urut = ['H', 'S', 'I', 'A', '-'];
+        const row = Array.isArray(att[sid]) ? att[sid] : []; while (row.length < dates.length) row.push('-');
+        row[i] = urut[(urut.indexOf(row[i] || '-') + 1) % urut.length]; att[sid] = row;
+        const wrap = document.querySelector('#absen-konten .ag-tablewrap'), sx = wrap ? wrap.scrollLeft : 0, sy = wrap ? wrap.scrollTop : 0;
+        absenTulis(rec, dates, att); syncDB(); renderAbsenRekap(cid); renderChartAbsensi();
+        const w2 = document.querySelector('#absen-konten .ag-tablewrap'); if (w2) { w2.scrollLeft = sx; w2.scrollTop = sy; }
+    }
+    function absenIsiTanggalKosong(i, tgl) {
+        const cid = document.getElementById('absen-kelas').value, month = document.getElementById('absen-bulan').value, rec = absenCariRec(cid, month); if (!rec || !tgl) return;
+        const { dates, att } = absenBaca(rec);
+        if (tgl.slice(5, 7) !== month) return Swal.fire('Bulan tidak cocok', `Pilih tanggal di bulan ${AG_NAMA_BULAN[Number(month) - 1]}.`, 'warning').then(() => renderAbsenRekap(cid));
+        if (dates.includes(tgl)) return Swal.fire('Tanggal sudah ada', 'Tanggal ini sudah punya kolom absensi sendiri.', 'info').then(() => renderAbsenRekap(cid));
+        dates[i] = tgl; absenTulis(rec, dates, att); syncDB(); renderAbsenRekap(cid);
+    }
 
     function renderChartAbsensi() {
-        let tH = 0, tS = 0, tI = 0, tA = 0;
-        document.querySelectorAll('.select-absen-val').forEach(sel => { if (sel.value === 'H') tH++; else if (sel.value === 'S') tS++; else if (sel.value === 'I') tI++; else if (sel.value === 'A') tA++; });
+        if (!document.getElementById('chartAbsensi')) return;   // grafik kehadiran sudah tidak ditampilkan
+        const cid = document.getElementById('absen-kelas').value;
+        const { dates, att } = absenBaca(absenCariRec(cid, absenBulanAktif()));
+        const t = { H: 0, S: 0, I: 0, A: 0 };
+        absenSiswa(cid).forEach(s => (att[s.StudentID] || []).slice(0, dates.length).forEach(v => { if (t[v] !== undefined) t[v]++; }));
         if (chartAbsensiObj) chartAbsensiObj.destroy();
         chartAbsensiObj = new Chart(document.getElementById('chartAbsensi').getContext('2d'), {
-            type: 'bar', data: { labels: ['Hadir', 'Sakit', 'Izin', 'Alpha'], datasets: [{ label: 'Kehadiran', data: [tH, tS, tI, tA], backgroundColor: ['#21865B', '#315E91', '#B7791F', '#C44747'], borderRadius: 5 }] },
+            type: 'bar', data: { labels: ['Hadir', 'Sakit', 'Izin', 'Alpha'], datasets: [{ label: 'Kehadiran', data: [t.H, t.S, t.I, t.A], backgroundColor: ['#21865B', '#315E91', '#B7791F', '#C44747'], borderRadius: 5 }] },
             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
         });
     }
 
+    // Data tersimpan otomatis setiap perubahan; fungsi ini dipakai sebelum ekspor & tombol lama.
     function saveAbsensi(isSilent = false) {
-        const cid = document.getElementById('absen-kelas').value, month = document.getElementById('absen-bulan').value;
-        if (!cid) { if (!isSilent) Swal.fire('Error', 'Pilih kelas', 'error'); return; }
-        let customDates = []; document.querySelectorAll('.date-absen-col').forEach(i => customDates.push(i.value));
-        let attData = {};
-        db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => { let st = []; document.querySelectorAll(`.select-absen-val[data-sid="${s.StudentID}"]`).forEach(sel => st.push(sel.value)); attData[s.StudentID] = st; });
-
-        let idx = db.attendance.findIndex(a => String(a.ClassID) === String(cid) && String(a.MonthYear) === String(month) && matchTapel(a, getActiveTapel()));
-        if (idx >= 0) { db.attendance[idx].DatesData = JSON.stringify(customDates); db.attendance[idx].AttendanceData = JSON.stringify(attData); db.attendance[idx].TahunPelajaran = db.attendance[idx].TahunPelajaran || getActiveTapel(); }
-        else db.attendance.push({ RecordID: "A" + Date.now(), ClassID: cid, MonthYear: month, TahunPelajaran: getActiveTapel(), DatesData: JSON.stringify(customDates), AttendanceData: JSON.stringify(attData) });
-        syncDB(); if (!isSilent) Swal.fire({ icon: 'success', title: 'Tersimpan', text: 'Data Absensi disimpan', timer: 1500, showConfirmButton: false });
+        syncDB();
+        if (!isSilent) Swal.fire({ icon: 'success', title: 'Tersimpan', text: 'Data Absensi disimpan', timer: 1500, showConfirmButton: false });
     }
 
     async function downloadAbsenExcelSederhana(semester) {
@@ -2250,145 +2478,433 @@ window.AGENDA_GURU_LOADED = true;
         return sem === 'ganjil';
     }
 
+    // =====================================================================
+    // DATA NILAI — Penilaian Harian: satu penilaian per layar (navigator ‹ › + daftar ringkas)
+    // dan Rekap Nilai satu semester. PTS/PAS: satu daftar ke bawah.
+    // Struktur data TIDAK berubah: Formatif tetap disimpan per bulan (MonthYear) dengan
+    // DatesData, Cakupan, dan GradesData { StudentID: [nilai per kolom] }; bulan diambil dari tanggal.
+    // =====================================================================
+    const AG_BULAN_SEM = { ganjil: ['07', '08', '09', '10', '11', '12'], genap: ['01', '02', '03', '04', '05', '06'] };
+    let nilaiMode = 'input';           // 'input' | 'rekap'
+    let nilaiPilih = null;             // { m: '11', i: 2 } penilaian harian yang sedang diisi
+    let nilaiDetailBuka = false, nilaiDaftarBuka = false, nilaiFormBaru = false, nilaiBulanBuka = {}, nilaiKunciCtx = '', nilaiSemDiatur = false;
+    let nilaiSimpanTimer = null;
+
+    function semesterDariTanggal(iso) { return AG_BULAN_SEM.ganjil.includes(String(iso).slice(5, 7)) ? 'ganjil' : 'genap'; }
+    function getNilaiSemester() { return document.getElementById('nilai-semester')?.value || semesterDariTanggal(agTglHariIni()); }
+    function nilaiCtx() {
+        return {
+            cid: document.getElementById('nilai-kelas').value, mapel: document.getElementById('nilai-mapel').value,
+            jenis: document.getElementById('nilai-jenis').value, sem: getNilaiSemester(), tapel: getActiveTapel()
+        };
+    }
+    function nilaiKKM() { return parseFloat(db.config && db.config.kkmNilai) || 75; }
+    function nilaiBaca(rec) {
+        let dates = [], caku = [], grades = {};
+        if (rec) {
+            try { dates = JSON.parse(rec.DatesData) || []; } catch (e) { }
+            try { caku = JSON.parse(rec.Cakupan) || []; } catch (e) { }
+            try { grades = JSON.parse(rec.GradesData) || {}; } catch (e) { }
+        }
+        if (!Array.isArray(dates)) dates = []; if (!Array.isArray(caku)) caku = []; if (!grades || typeof grades !== 'object') grades = {};
+        return { dates, caku, grades };
+    }
+    function nilaiTulis(rec, d) { rec.DatesData = JSON.stringify(d.dates); rec.Cakupan = JSON.stringify(d.caku); rec.GradesData = JSON.stringify(d.grades); rec.TahunPelajaran = rec.TahunPelajaran || getActiveTapel(); }
+    function nilaiRecHarian(ctx, m) {
+        return db.grades.slice().reverse().find(g => String(g.ClassID) === String(ctx.cid) && String(g.Subject) === String(ctx.mapel) && String(g.Type) === 'Formatif' && String(g.MonthYear) === String(m) && matchTapel(g, ctx.tapel));
+    }
+    function nilaiRecSumatif(ctx, buat) {
+        let rec = db.grades.slice().reverse().find(g => String(g.ClassID) === String(ctx.cid) && String(g.Subject) === String(ctx.mapel) && String(g.Type) === String(ctx.jenis) && isGradeMatchingSemester(g, ctx.sem) && matchTapel(g, ctx.tapel));
+        if (!rec && buat) {
+            rec = { RecordID: 'G' + Date.now(), ClassID: ctx.cid, Subject: ctx.mapel, Cakupan: '[]', Type: ctx.jenis, Semester: ctx.sem, TahunPelajaran: ctx.tapel, MonthYear: ctx.sem === 'ganjil' ? '12' : '06', DatesData: '[]', GradesData: '{}' };
+            db.grades.push(rec);
+        }
+        return rec;
+    }
+    // Semua penilaian harian satu semester, urut bulan lalu tanggal (kolom tanpa tanggal di akhir bulannya).
+    function nilaiDaftar(ctx) {
+        const stds = absenSiswa(ctx.cid), out = [];
+        AG_BULAN_SEM[ctx.sem].forEach(m => {
+            const rec = nilaiRecHarian(ctx, m); if (!rec) return;
+            const d = nilaiBaca(rec), cols = [];
+            d.dates.forEach((tgl, i) => {
+                const terisi = stds.filter(s => agIsiNilai((d.grades[s.StudentID] || [])[i])).length;
+                // kolom kosong sisa tampilan lama (tanpa tanggal, materi, dan nilai) tidak ditampilkan
+                if (!tgl && !String(d.caku[i] || '').trim() && !Object.values(d.grades).some(r => Array.isArray(r) && agIsiNilai(r[i]))) return;
+                cols.push({ m, i, tgl: tgl || '', materi: String(d.caku[i] || ''), terisi, total: stds.length });
+            });
+            cols.sort((a, b) => (a.tgl ? 0 : 1) - (b.tgl ? 0 : 1) || (a.tgl < b.tgl ? -1 : a.tgl > b.tgl ? 1 : a.i - b.i));
+            out.push(...cols);
+        });
+        out.forEach((a, n) => { a.no = n + 1; a.judul = a.materi.trim() || ('Penilaian ke-' + (n + 1)); });
+        return out;
+    }
+    function nilaiCari(daftar) { return nilaiPilih ? daftar.findIndex(a => a.m === nilaiPilih.m && a.i === nilaiPilih.i) : -1; }
+
+    function nilaiSetMode(m) { nilaiMode = m; nilaiDaftarBuka = false; nilaiFormBaru = false; loadNilaiData(); }
+
     function loadNilaiData() {
-        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value, jenis = document.getElementById('nilai-jenis').value, bulan = document.getElementById('nilai-bulan').value, container = document.getElementById('container-table-nilai');
-        if (!cid || !mapel) { container.innerHTML = '<div class="alert alert-secondary text-center">Silakan pilih Kelas dan Mata Pelajaran.</div>'; document.getElementById('nilai-stats-container').style.display = 'none'; document.getElementById('btn-add-nilai-col').style.display = 'none'; return; }
+        const semSel = document.getElementById('nilai-semester');
+        if (semSel && !nilaiSemDiatur) { semSel.value = semesterDariTanggal(agTglHariIni()); nilaiSemDiatur = true; }
+        const ctx = nilaiCtx(), container = document.getElementById('container-table-nilai');
+        const kunci = [ctx.cid, ctx.mapel, ctx.jenis, ctx.sem, ctx.tapel].join('|');
+        if (kunci !== nilaiKunciCtx) { nilaiKunciCtx = kunci; nilaiPilih = null; nilaiDaftarBuka = false; nilaiFormBaru = false; nilaiBulanBuka = {}; }
+        const harian = ctx.jenis === 'Formatif';
+        if (!harian) nilaiMode = 'input';
+        document.getElementById('nilai-tabs').style.display = harian ? '' : 'none';
+        document.getElementById('nilai-tab-input').classList.toggle('active', nilaiMode === 'input');
+        document.getElementById('nilai-tab-rekap').classList.toggle('active', nilaiMode === 'rekap');
+        document.getElementById('nilai-tab-input').setAttribute('aria-selected', nilaiMode === 'input');
+        document.getElementById('nilai-tab-rekap').setAttribute('aria-selected', nilaiMode === 'rekap');
+        if (!ctx.cid || !ctx.mapel) {
+            container.innerHTML = '<div class="alert alert-secondary text-center mb-0">Silakan pilih Kelas dan Mata Pelajaran.</div>';
+            return;
+        }
+        if (!absenSiswa(ctx.cid).length) {
+            container.innerHTML = '<div class="alert alert-secondary text-center mb-0">Belum ada siswa di kelas ini. Tambahkan siswa di menu Manajemen Kelas.</div>';
+            return;
+        }
+        if (!harian) renderNilaiSumatif(ctx);
+        else if (nilaiMode === 'rekap') renderNilaiRekap(ctx);
+        else renderNilaiHarian(ctx);
+        calculateStatsNilai(true);
+    }
 
-        const currentSemester = ['07', '08', '09', '10', '11', '12'].includes(String(bulan)) ? 'ganjil' : 'genap';
-        const stds = db.students.filter(s => String(s.ClassID) === String(cid));
-        const record = db.grades.slice().reverse().find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === String(jenis) && (jenis === 'Formatif' ? String(g.MonthYear) === String(bulan) : isGradeMatchingSemester(g, currentSemester)) && matchTapel(g, getActiveTapel()));
+    function nilaiBarisHtml(stds, getVal, kkm) {
+        return stds.map((s, i) => {
+            const v = getVal(s.StudentID), sid = escapeHtml(s.StudentID), st = nilaiStatus(v, kkm);
+            return `<div class="ag-row" role="listitem">
+                <span class="ag-no">${i + 1}</span>
+                <label class="ag-name" for="nilai-in-${sid}">${escapeHtml(s.StudentName)}<span class="ag-badge ag-badge-sm ${st.cls}" data-badge-for="${sid}">${st.teks}</span></label>
+                <input id="nilai-in-${sid}" class="ag-numin ${st.inCls}" type="number" inputmode="decimal" enterkeyhint="next" min="0" max="100" step="any"
+                    value="${agIsiNilai(v) ? escapeHtml(v) : ''}" data-sid="${sid}" oninput="nilaiInput(this)" onkeydown="nilaiEnter(event)" autocomplete="off">
+                <span class="ag-badge ag-badge-lg ${st.cls}" data-badge-for="${sid}">${st.teks}</span>
+                <button type="button" class="ag-iconbtn ag-wa" onclick="sendWANilai('${sid}')" title="Kirim nilai ke WA orang tua" aria-label="Kirim nilai ke WA orang tua ${escapeHtml(s.StudentName)}"><i class="bi bi-whatsapp"></i></button>
+            </div>`;
+        }).join('');
+    }
+    function nilaiStatus(v, kkm) {
+        if (!agIsiNilai(v)) return { teks: 'Belum diisi', cls: 'b-kosong', inCls: '' };
+        const n = parseFloat(v);
+        if (isNaN(n) || n < 0 || n > 100) return { teks: 'Periksa (0–100)', cls: 'b-rendah', inCls: 'is-rendah' };
+        return n < kkm ? { teks: 'Perlu remedial', cls: 'b-rendah', inCls: 'is-rendah' } : { teks: 'Tuntas', cls: 'b-tuntas', inCls: 'is-tuntas' };
+    }
+    function nilaiRingkasHtml(vals, total, kkm) {
+        const nums = vals.filter(agIsiNilai).map(parseFloat).filter(n => !isNaN(n));
+        const avg = nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1).replace('.', ',') : '-';
+        return `<div class="ag-sumbox"><b>${nums.length} / ${total}</b><span>Sudah diisi</span></div>
+            <div class="ag-sumbox st-S"><b>${avg}</b><span>Rata-rata kelas</span></div>
+            <div class="ag-sumbox st-A"><b>${nums.filter(n => n < kkm).length} siswa</b><span>Di bawah KKM ${kkm}</span></div>`;
+    }
+    function nilaiAlatHtml() {
+        return `<div class="ag-tools">
+            <span class="ag-hint"><kbd>Enter</kbd> pindah ke siswa berikutnya. Nilai tersimpan otomatis.</span>
+            <label class="ag-fill">KKM <input type="number" id="input-kkm" value="${nilaiKKM()}" min="0" max="100" class="ag-numin ag-numin-sm" aria-label="KKM" onchange="nilaiUbahKKM(this.value)"></label>
+            <label class="ag-fill">Isi yang kosong dengan <input type="number" id="nilai-isi-kosong" value="100" min="0" max="100" class="ag-numin ag-numin-sm" aria-label="Nilai pengisi"></label>
+            <button type="button" class="ag-btn" onclick="nilaiIsiKosong()">Terapkan</button>
+        </div>`;
+    }
 
-        let sDates = [], sGrades = {}, sCakupan = [];
-        if (record) { try { sDates = JSON.parse(record.DatesData) || []; sGrades = JSON.parse(record.GradesData) || {}; sCakupan = JSON.parse(record.Cakupan) || []; } catch (e) { } }
+    function renderNilaiHarian(ctx) {
+        const box = document.getElementById('container-table-nilai'), daftar = nilaiDaftar(ctx), stds = absenSiswa(ctx.cid), kkm = nilaiKKM();
+        let pos = nilaiCari(daftar);
+        if (pos < 0 && daftar.length) { pos = daftar.length - 1; nilaiPilih = { m: daftar[pos].m, i: daftar[pos].i }; }
+        const cur = pos >= 0 ? daftar[pos] : null;
+        let html = `<div class="ag-nav">
+            <button type="button" class="ag-iconbtn" onclick="nilaiGeser(-1)" aria-label="Penilaian sebelumnya"${pos > 0 ? '' : ' disabled'}><i class="bi bi-chevron-left"></i></button>
+            <div class="ag-nav-mid">
+                <div class="ag-nav-sub">${cur ? `Penilaian ke-${pos + 1} dari ${daftar.length} · Terisi ${cur.terisi}/${cur.total}` : 'Semester ' + (ctx.sem === 'ganjil' ? 'Ganjil' : 'Genap')}</div>
+                <div class="ag-nav-title">${cur ? escapeHtml((cur.tgl ? formatTanggalIndo(cur.tgl).replace(/^[^,]+, /, '') : 'Tanpa tanggal') + ' · ' + cur.judul) : 'Belum ada penilaian'}</div>
+            </div>
+            <button type="button" class="ag-iconbtn" onclick="nilaiGeser(1)" aria-label="Penilaian berikutnya"${cur && pos < daftar.length - 1 ? '' : ' disabled'}><i class="bi bi-chevron-right"></i></button>
+            <div class="ag-nav-tools">
+                <button type="button" class="ag-btn" onclick="nilaiToggleDaftar()" aria-expanded="${nilaiDaftarBuka}"${daftar.length ? '' : ' disabled'}><i class="bi bi-list-ul"></i> Daftar penilaian (${daftar.length})</button>
+                <button type="button" class="ag-btn ag-btn-new" onclick="nilaiToggleBaru()" aria-expanded="${nilaiFormBaru}"><i class="bi bi-plus-lg"></i> Penilaian baru</button>
+            </div>
+        </div>`;
+        if (nilaiFormBaru || !daftar.length) {
+            html += `<div class="ag-newform">
+                <div class="ag-newform-title">${daftar.length ? 'Penilaian baru' : 'Belum ada penilaian harian di semester ini. Buat yang pertama:'}</div>
+                <label>Tanggal<input type="date" id="nilai-baru-tgl" value="${agTglHariIni()}"></label>
+                <label class="ag-grow">Materi / tujuan pembelajaran<input type="text" id="nilai-baru-materi" placeholder="Contoh: Pecahan sederhana" onkeydown="if(event.key==='Enter'){event.preventDefault();nilaiBuatBaru();}"></label>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="nilaiBuatBaru()">Buat dan mulai isi</button>
+                ${daftar.length ? '<button type="button" class="ag-btn" onclick="nilaiToggleBaru()">Batal</button>' : ''}
+            </div>`;
+        }
+        if (nilaiDaftarBuka && daftar.length) {
+            const bulanCur = cur ? cur.m : '';
+            html += '<div class="ag-daftar">';
+            AG_BULAN_SEM[ctx.sem].slice().reverse().forEach(m => {
+                const isi = daftar.filter(a => a.m === m); if (!isi.length) return;
+                const buka = nilaiBulanBuka[m] !== undefined ? nilaiBulanBuka[m] : m === bulanCur;
+                html += `<button type="button" class="ag-daftar-head" onclick="nilaiToggleBulan('${m}', ${!buka})" aria-expanded="${buka}">
+                    <span>${AG_NAMA_BULAN[Number(m) - 1].toUpperCase()}</span><span class="ag-daftar-count">${isi.length} penilaian <i class="bi bi-chevron-${buka ? 'up' : 'down'}"></i></span></button>`;
+                if (buka) isi.slice().reverse().forEach(a => {
+                    const on = cur && a.m === cur.m && a.i === cur.i, lengkap = a.terisi >= a.total;
+                    html += `<button type="button" class="ag-daftar-item${on ? ' on' : ''}" onclick="nilaiPilihKe('${a.m}', ${a.i})" aria-current="${on}">
+                        <span class="ag-daftar-tgl">${escapeHtml(agTglPendek(a.tgl))}</span><span class="ag-daftar-materi">${escapeHtml(a.judul)}</span>
+                        <span class="ag-daftar-prog ${lengkap ? 'ok' : ''}">${lengkap ? 'Lengkap' : a.terisi + '/' + a.total}</span></button>`;
+                });
+            });
+            html += '</div>';
+        }
+        if (cur) {
+            const d = nilaiBaca(nilaiRecHarian(ctx, cur.m));
+            html += `<details class="ag-detailbox"${nilaiDetailBuka ? ' open' : ''} ontoggle="nilaiDetailBuka=this.open"><summary><i class="bi bi-pencil-square"></i> Ubah tanggal, materi, atau hapus penilaian ini</summary><div class="ag-detail">
+                <label>Tanggal<input type="date" value="${cur.tgl}" onchange="nilaiUbahTanggal(this.value)"></label>
+                <label class="ag-grow">Materi / tujuan pembelajaran<input type="text" value="${escapeHtml(cur.materi)}" placeholder="Contoh: Pecahan sederhana" onchange="nilaiUbahMateri(this.value)"></label>
+                <button type="button" class="ag-btn ag-btn-danger-outline" onclick="nilaiHapusPenilaian()"><i class="bi bi-trash"></i> Hapus penilaian</button>
+            </div></details>
+            <div class="ag-sum3" id="nilai-ringkas">${nilaiRingkasHtml(stds.map(s => (d.grades[s.StudentID] || [])[cur.i]), stds.length, kkm)}</div>
+            ${nilaiAlatHtml()}
+            <div class="ag-list" role="list" data-list="nilai">${nilaiBarisHtml(stds, sid => (d.grades[sid] || [])[cur.i], kkm)}</div>`;
+        }
+        box.innerHTML = html;
+    }
 
-        let html = '';
-        if (jenis === 'Formatif') {
-            document.getElementById('btn-add-nilai-col').style.display = 'inline-block';
-            if (sDates.length === 0) { sDates = [""]; sCakupan = [""]; }
-            let colCount = sDates.length;
+    function renderNilaiSumatif(ctx) {
+        const box = document.getElementById('container-table-nilai'), stds = absenSiswa(ctx.cid), kkm = nilaiKKM();
+        const d = nilaiBaca(nilaiRecSumatif(ctx, false));
+        const label = ctx.jenis === 'SumatifLM' ? 'Penilaian Tengah Semester' : 'Penilaian Akhir Semester';
+        box.innerHTML = `<div class="ag-nav"><div class="ag-nav-mid ag-nav-left">
+                <div class="ag-nav-sub">Semester ${ctx.sem === 'ganjil' ? 'Ganjil' : 'Genap'} · TP ${escapeHtml(ctx.tapel)}</div>
+                <div class="ag-nav-title">${label}</div></div></div>
+            <div class="ag-sum3" id="nilai-ringkas">${nilaiRingkasHtml(stds.map(s => (d.grades[s.StudentID] || [])[0]), stds.length, kkm)}</div>
+            ${nilaiAlatHtml()}
+            <div class="ag-list" role="list" data-list="nilai">${nilaiBarisHtml(stds, sid => (d.grades[sid] || [])[0], kkm)}</div>`;
+    }
 
-            html += '<table class="table table-bordered table-dynamic" id="table-nilai-input"><thead><tr class="table-success"><th style="min-width:210px; vertical-align:middle;">Nama Siswa</th>';
-            for (let i = 0; i < colCount; i++) {
-                html += `<th><input type="date" class="date-input-header date-nilai-col mb-1" value="${sDates[i] || ""}" onchange="saveNilai(true)"><input type="text" class="form-control form-control-sm cakupan-nilai-col" style="font-size:0.75rem; width:125px; margin:0 auto;" placeholder="Materi" value="${sCakupan[i] || ""}" onchange="saveNilai(true)">
-                        ${colCount > 1 ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 py-0 px-1" onclick="deleteNilaiColumn(${i})" title="Hapus Kolom Ini"><i class="bi bi-trash"></i></button>` : ''}
-                    </th>`;
+    function renderNilaiRekap(ctx) {
+        const box = document.getElementById('container-table-nilai'), daftar = nilaiDaftar(ctx), stds = absenSiswa(ctx.cid), kkm = nilaiKKM();
+        if (!daftar.length) {
+            box.innerHTML = `<div class="ag-empty"><i class="bi bi-journal-x"></i><p>Belum ada penilaian harian di semester ini.</p>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="nilaiSetMode('input')">Buka Input per Penilaian</button></div>`;
+            return;
+        }
+        const recs = {}; daftar.forEach(a => { if (!recs[a.m]) recs[a.m] = nilaiBaca(nilaiRecHarian(ctx, a.m)); });
+        let html = `<div class="ag-legend"><span><span class="ag-cellmini b-rendah"></span>Di bawah KKM ${kkm}</span><span><span class="ag-cellmini st-kosong"></span>Belum diisi</span>
+            <span class="ag-legend-note">Ketuk judul penilaian untuk mengisi atau mengubah nilainya.</span></div>
+            <div class="ag-tablewrap"><table class="ag-table"><thead><tr><th scope="col" class="ag-stick-l">Nama siswa</th>`;
+        daftar.forEach(a => {
+            html += `<th scope="col"><button type="button" class="ag-colhead" onclick="nilaiPilihKe('${a.m}', ${a.i}); nilaiSetMode('input')" title="Buka penilaian ini">
+                <small>${escapeHtml(agTglPendek(a.tgl))}</small><b>${escapeHtml(a.judul)}</b></button></th>`;
+        });
+        html += '<th scope="col" class="ag-stick-r">Rata-rata</th></tr></thead><tbody>';
+        stds.forEach(s => {
+            const nums = [];
+            html += `<tr><th scope="row" class="ag-stick-l">${escapeHtml(s.StudentName)}</th>`;
+            daftar.forEach(a => {
+                const v = (recs[a.m].grades[s.StudentID] || [])[a.i], isi = agIsiNilai(v), n = parseFloat(v);
+                if (isi && !isNaN(n)) nums.push(n);
+                html += `<td><span class="ag-cellval ${!isi ? 'st-kosong' : (n < kkm ? 'b-rendah' : '')}">${isi ? escapeHtml(v) : '-'}</span></td>`;
+            });
+            const avg = nums.length ? nums.reduce((x, y) => x + y, 0) / nums.length : null;
+            html += `<td class="ag-stick-r ag-total${avg !== null && avg < kkm ? ' t-A' : ''}">${avg === null ? '-' : avg.toFixed(1).replace('.', ',')}</td></tr>`;
+        });
+        box.innerHTML = html + '</tbody></table></div>';
+    }
+
+    function nilaiGeser(n) {
+        const daftar = nilaiDaftar(nilaiCtx()), pos = nilaiCari(daftar) + n;
+        if (pos < 0 || pos >= daftar.length) return;
+        nilaiPilih = { m: daftar[pos].m, i: daftar[pos].i }; nilaiFormBaru = false; loadNilaiData();
+    }
+    function nilaiPilihKe(m, i) { nilaiPilih = { m: String(m), i: Number(i) }; nilaiDaftarBuka = false; nilaiFormBaru = false; loadNilaiData(); }
+    function nilaiToggleDaftar() { nilaiDaftarBuka = !nilaiDaftarBuka; nilaiFormBaru = false; loadNilaiData(); }
+    function nilaiToggleBulan(m, buka) { nilaiBulanBuka[m] = buka; loadNilaiData(); }
+    function nilaiToggleBaru() {
+        nilaiFormBaru = !nilaiFormBaru; nilaiDaftarBuka = false; loadNilaiData();
+        if (nilaiFormBaru) document.getElementById('nilai-baru-materi')?.focus();
+    }
+
+    // Sisipkan satu kolom penilaian (urut tanggal) ke rekaman bulannya; vals = { StudentID: nilai }.
+    function nilaiSisipKolom(ctx, tgl, materi, vals) {
+        const m = tgl.slice(5, 7);
+        let rec = nilaiRecHarian(ctx, m);
+        if (!rec) {
+            rec = { RecordID: 'G' + Date.now(), ClassID: ctx.cid, Subject: ctx.mapel, Cakupan: '[]', Type: 'Formatif', Semester: semesterDariTanggal(tgl), TahunPelajaran: ctx.tapel, MonthYear: m, DatesData: '[]', GradesData: '{}' };
+            db.grades.push(rec);
+        }
+        const d = nilaiBaca(rec);
+        // buang kolom kosong sisa tampilan lama (tanpa tanggal, materi, dan nilai)
+        for (let i = d.dates.length - 1; i >= 0; i--) {
+            if (!d.dates[i] && !String(d.caku[i] || '').trim() && !Object.values(d.grades).some(r => Array.isArray(r) && agIsiNilai(r[i]))) {
+                d.dates.splice(i, 1); d.caku.splice(i, 1); Object.values(d.grades).forEach(r => { if (Array.isArray(r)) r.splice(i, 1); });
             }
-            html += '</tr></thead><tbody>';
-            stds.forEach(s => {
-                html += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${escapeHtml(s.StudentName)}
-                    <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="sendWANilai('${s.StudentID}')" title="Kirim WA Orang Tua"><i class="bi bi-whatsapp"></i></button>
-                    </td>`;
-                let grades = sGrades[s.StudentID] || Array(colCount).fill('');
-                for (let i = 0; i < colCount; i++) html += `<td><input type="number" class="form-control form-control-sm px-1 text-center input-nilai-val" style="width:60px; margin:0 auto;" data-sid="${s.StudentID}" value="${grades[i] || ''}" oninput="calculateStatsNilai()"></td>`;
-                html += '</tr>';
-            });
-            html += '</tbody></table>'; document.getElementById('nilai-bulan').disabled = false;
-        } else {
-            document.getElementById('btn-add-nilai-col').style.display = 'none';
-            const jenisLabel = jenis === 'SumatifLM' ? 'Penilaian Tengah Semester' : (jenis === 'SumatifAS' ? 'Penilaian Akhir Semester' : jenis);
-            html += `<table class="table table-bordered" id="table-nilai-input"><thead class="table-primary"><tr><th width="30%">Nama Siswa</th><th>Nilai ${jenisLabel}</th></tr></thead><tbody>`;
-            stds.forEach(s => {
-                html += `<tr><td class="fw-bold d-flex align-items-center justify-content-between">${escapeHtml(s.StudentName)}
-                    <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="sendWANilai('${s.StudentID}')" title="Kirim WA Orang Tua"><i class="bi bi-whatsapp"></i></button>
-                    </td><td><input type="number" class="form-control w-50 input-nilai-val" data-sid="${s.StudentID}" value="${sGrades[s.StudentID] ? sGrades[s.StudentID][0] : ''}" oninput="calculateStatsNilai()"></td></tr>`;
-            });
-            html += '</tbody></table>'; document.getElementById('nilai-bulan').disabled = true;
         }
-        container.innerHTML = html; document.getElementById('nilai-stats-container').style.display = 'flex'; document.getElementById('nilai-chart-container').style.display = 'block'; calculateStatsNilai(true);
+        const n = d.dates.length;
+        while (d.caku.length < n) d.caku.push(''); d.caku.length = n;
+        let idx = d.dates.findIndex(x => !x || x > tgl); if (idx < 0) idx = n;
+        d.dates.splice(idx, 0, tgl); d.caku.splice(idx, 0, materi);
+        const sids = new Set([...Object.keys(d.grades), ...absenSiswa(ctx.cid).map(s => String(s.StudentID)), ...Object.keys(vals || {})]);
+        sids.forEach(sid => {
+            const row = Array.isArray(d.grades[sid]) ? d.grades[sid].slice(0, n) : [];
+            while (row.length < n) row.push('');
+            row.splice(idx, 0, vals && agIsiNilai(vals[sid]) ? vals[sid] : '');
+            d.grades[sid] = row;
+        });
+        nilaiTulis(rec, d);
+        return { m, i: idx };
     }
-
-    function addNilaiColumn() {
-        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value, jenis = document.getElementById('nilai-jenis').value, bulan = document.getElementById('nilai-bulan').value;
-        if (!cid || !mapel) return Swal.fire('Error', 'Pilih kelas & mapel', 'error');
-        if (jenis !== 'Formatif') return;
-        saveNilai(true);
-        let record = db.grades.find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === String(jenis) && String(g.MonthYear) === String(bulan) && matchTapel(g, getActiveTapel()));
-        if (record) {
-            let dates = JSON.parse(record.DatesData); dates.push(""); record.DatesData = JSON.stringify(dates);
-            let caku = JSON.parse(record.Cakupan); caku.push(""); record.Cakupan = JSON.stringify(caku);
-            let gd = JSON.parse(record.GradesData); for (let sid in gd) { gd[sid].push(""); } record.GradesData = JSON.stringify(gd); syncDB();
+    // Ambil satu kolom keluar dari rekamannya; mengembalikan isinya.
+    function nilaiCabutKolom(ctx, m, i) {
+        const rec = nilaiRecHarian(ctx, m); if (!rec) return null;
+        const d = nilaiBaca(rec), vals = {};
+        Object.keys(d.grades).forEach(sid => { const r = d.grades[sid]; if (Array.isArray(r)) { if (agIsiNilai(r[i])) vals[sid] = r[i]; r.splice(i, 1); } });
+        const out = { tgl: d.dates[i] || '', materi: d.caku[i] || '', vals };
+        d.dates.splice(i, 1); if (d.caku.length > i) d.caku.splice(i, 1);
+        nilaiTulis(rec, d);
+        return out;
+    }
+    function nilaiCekSemester(tgl) {
+        const sem = semesterDariTanggal(tgl), sel = document.getElementById('nilai-semester');
+        if (sel.value !== sem) {
+            sel.value = sem; nilaiKunciCtx = [nilaiCtx().cid, nilaiCtx().mapel, nilaiCtx().jenis, sem, getActiveTapel()].join('|');
+            Swal.fire({ icon: 'info', title: 'Semester disesuaikan', text: `Tanggal ini termasuk Semester ${sem === 'ganjil' ? 'Ganjil' : 'Genap'}, jadi pilihan semester ikut diganti.`, timer: 2600, showConfirmButton: false });
         }
-        loadNilaiData();
     }
-
-    function deleteNilaiColumn(idx) {
-        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value, jenis = document.getElementById('nilai-jenis').value, bulan = document.getElementById('nilai-bulan').value;
-        if (!cid || !mapel || jenis !== 'Formatif') return;
-        saveNilai(true); // pastikan perubahan yang belum tersimpan tidak ikut hilang
-        let record = db.grades.find(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === String(jenis) && String(g.MonthYear) === String(bulan) && matchTapel(g, getActiveTapel()));
-        if (!record) return;
-        let dates = []; try { dates = JSON.parse(record.DatesData); } catch (e) { }
-        if (dates.length <= 1) return Swal.fire('Tidak Bisa', 'Minimal harus ada 1 kolom penilaian.', 'warning');
-
+    async function nilaiBuatBaru() {
+        const tgl = document.getElementById('nilai-baru-tgl')?.value, materi = (document.getElementById('nilai-baru-materi')?.value || '').trim();
+        if (!tgl) return Swal.fire('Tanggal belum diisi', 'Pilih tanggal penilaian terlebih dahulu.', 'warning');
+        let ctx = nilaiCtx();
+        const sama = nilaiDaftar(Object.assign({}, ctx, { sem: semesterDariTanggal(tgl) }))
+            .find(a => a.tgl === tgl && a.materi.trim().toLowerCase() === materi.toLowerCase());
+        if (sama) {
+            const r = await Swal.fire({
+                icon: 'question', title: 'Penilaian ini sudah ada',
+                html: `Sudah ada penilaian <b>${escapeHtml(formatTanggalIndo(tgl))}</b>${materi ? ' dengan materi <b>' + escapeHtml(materi) + '</b>' : ' tanpa materi'}. Buka yang lama?`,
+                showDenyButton: true, showCancelButton: true, confirmButtonText: 'Buka yang lama', denyButtonText: 'Tetap buat baru', cancelButtonText: 'Batal'
+            });
+            if (r.isConfirmed) { nilaiCekSemester(tgl); return nilaiPilihKe(sama.m, sama.i); }
+            if (!r.isDenied) return;
+        }
+        nilaiCekSemester(tgl); ctx = nilaiCtx();
+        nilaiPilih = nilaiSisipKolom(ctx, tgl, materi, {});
+        nilaiFormBaru = false; nilaiDaftarBuka = false;
+        syncDB(); loadNilaiData();
+        document.querySelector('#container-table-nilai .ag-numin[data-sid]')?.focus();
+        warnTapelMismatch('nilai', tgl);
+    }
+    function nilaiUbahMateri(v) {
+        const ctx = nilaiCtx(); if (!nilaiPilih) return;
+        const rec = nilaiRecHarian(ctx, nilaiPilih.m); if (!rec) return;
+        const d = nilaiBaca(rec); while (d.caku.length < d.dates.length) d.caku.push('');
+        d.caku[nilaiPilih.i] = String(v).trim(); nilaiTulis(rec, d); syncDB(); loadNilaiData();
+    }
+    function nilaiUbahTanggal(tgl) {
+        const ctx = nilaiCtx(); if (!nilaiPilih || !tgl) return;
+        const isi = nilaiCabutKolom(ctx, nilaiPilih.m, nilaiPilih.i); if (!isi) return;
+        nilaiCekSemester(tgl);
+        nilaiPilih = nilaiSisipKolom(nilaiCtx(), tgl, isi.materi, isi.vals);
+        syncDB(); loadNilaiData();
+        warnTapelMismatch('nilai', tgl);
+    }
+    function nilaiHapusPenilaian() {
+        const ctx = nilaiCtx(); if (!nilaiPilih) return;
+        const daftar = nilaiDaftar(ctx), pos = nilaiCari(daftar); if (pos < 0) return;
+        const a = daftar[pos];
         Swal.fire({
-            title: 'Hapus Kolom Ini?', text: 'Seluruh nilai siswa pada kolom ini akan dihapus.', icon: 'warning',
-            showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, Hapus!', cancelButtonText: 'Batal'
-        }).then((result) => {
-            if (!result.isConfirmed) return;
-            dates.splice(idx, 1);
-            record.DatesData = JSON.stringify(dates);
-            let caku = []; try { caku = JSON.parse(record.Cakupan); } catch (e) { }
-            caku.splice(idx, 1);
-            record.Cakupan = JSON.stringify(caku);
-            let gd = {}; try { gd = JSON.parse(record.GradesData); } catch (e) { }
-            for (let sid in gd) { gd[sid].splice(idx, 1); }
-            record.GradesData = JSON.stringify(gd);
+            title: 'Hapus penilaian ini?', html: `<b>${escapeHtml(a.tgl ? formatTanggalIndo(a.tgl) : 'Tanpa tanggal')} · ${escapeHtml(a.judul)}</b><br>Semua nilai siswa pada penilaian ini akan dihapus.`, icon: 'warning',
+            showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal'
+        }).then(r => {
+            if (!r.isConfirmed) return;
+            nilaiCabutKolom(ctx, a.m, a.i);
+            const sisa = nilaiDaftar(ctx), p = Math.min(pos, sisa.length - 1);
+            nilaiPilih = p >= 0 ? { m: sisa[p].m, i: sisa[p].i } : null;
             syncDB(); loadNilaiData();
-            Swal.fire('Terhapus!', 'Kolom berhasil dihapus.', 'success');
+            Swal.fire({ icon: 'success', title: 'Terhapus', timer: 1300, showConfirmButton: false });
         });
     }
 
+    // Tulis satu nilai langsung ke data (tanpa menggambar ulang daftar agar kursor tidak hilang).
+    function nilaiTulisSatu(sid, v) {
+        const ctx = nilaiCtx();
+        if (ctx.jenis === 'Formatif') {
+            if (!nilaiPilih) return;
+            const rec = nilaiRecHarian(ctx, nilaiPilih.m); if (!rec) return;
+            const d = nilaiBaca(rec), row = Array.isArray(d.grades[sid]) ? d.grades[sid] : [];
+            while (row.length < d.dates.length) row.push('');
+            row[nilaiPilih.i] = v; d.grades[sid] = row; nilaiTulis(rec, d);
+        } else {
+            const rec = nilaiRecSumatif(ctx, true), d = nilaiBaca(rec);
+            d.grades[sid] = [v]; nilaiTulis(rec, d);
+            rec.Semester = ctx.sem; if (!rec.MonthYear) rec.MonthYear = ctx.sem === 'ganjil' ? '12' : '06';
+        }
+    }
+    function nilaiSimpanNanti() { clearTimeout(nilaiSimpanTimer); nilaiSimpanTimer = setTimeout(() => { nilaiSimpanTimer = null; syncDB(); }, 600); }
+    function nilaiInput(el) {
+        nilaiTulisSatu(el.dataset.sid, el.value);
+        nilaiSegarkanBaris(el);
+        nilaiSegarkanRingkas();
+        calculateStatsNilai(true);
+        nilaiSimpanNanti();
+    }
+    function nilaiSegarkanBaris(el) {
+        const st = nilaiStatus(el.value, nilaiKKM());
+        el.classList.remove('is-rendah', 'is-tuntas'); if (st.inCls) el.classList.add(st.inCls);
+        document.querySelectorAll(`[data-badge-for="${CSS.escape(el.dataset.sid)}"]`).forEach(b => { b.className = b.className.replace(/\bb-\S+/g, '').trim() + ' ' + st.cls; b.textContent = st.teks; });
+    }
+    function nilaiSegarkanRingkas() {
+        const box = document.getElementById('nilai-ringkas'); if (!box) return;
+        const ins = [...document.querySelectorAll('#container-table-nilai .ag-numin[data-sid]')];
+        box.innerHTML = nilaiRingkasHtml(ins.map(i => i.value), ins.length, nilaiKKM());
+    }
+    function nilaiEnter(e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const all = [...document.querySelectorAll('#container-table-nilai .ag-numin[data-sid]')];
+        const nx = all[all.indexOf(e.target) + 1];
+        if (nx) { nx.focus(); nx.select(); } else e.target.blur();
+    }
+    function nilaiIsiKosong() {
+        const v = (document.getElementById('nilai-isi-kosong')?.value || '').trim();
+        if (!agIsiNilai(v)) return Swal.fire('Nilai belum diisi', 'Isi angka yang akan dipakai untuk siswa yang nilainya masih kosong.', 'warning');
+        const kosong = [...document.querySelectorAll('#container-table-nilai .ag-numin[data-sid]')].filter(i => !agIsiNilai(i.value));
+        if (!kosong.length) return Swal.fire({ icon: 'info', title: 'Semua sudah terisi', timer: 1500, showConfirmButton: false });
+        kosong.forEach(i => { i.value = v; nilaiTulisSatu(i.dataset.sid, v); nilaiSegarkanBaris(i); });
+        nilaiSegarkanRingkas(); calculateStatsNilai(true); syncDB();
+        Swal.fire({ icon: 'success', title: `${kosong.length} siswa diisi ${v}`, timer: 1500, showConfirmButton: false });
+    }
+    function nilaiUbahKKM(v) {
+        const n = parseFloat(v);
+        if (isNaN(n) || n < 0 || n > 100) { Swal.fire('KKM tidak sesuai', 'Isi KKM antara 0 sampai 100.', 'warning'); document.getElementById('input-kkm').value = nilaiKKM(); return; }
+        db.config.kkmNilai = n; syncDB(); nilaiSegarkanSemuaBadge();
+    }
+    // Saat KKM diubah: perbarui label Tuntas/Remedial tanpa menggambar ulang.
+    function nilaiSegarkanSemuaBadge() {
+        document.querySelectorAll('#container-table-nilai .ag-numin[data-sid]').forEach(nilaiSegarkanBaris);
+        nilaiSegarkanRingkas();
+    }
+
+    // Statistik & grafik: Penilaian Harian = rata-rata semua penilaian semester ini; PTS/PAS = nilainya.
     function calculateStatsNilai(isInit = false) {
-        const cid = document.getElementById('nilai-kelas').value, jenis = document.getElementById('nilai-jenis').value, kkmValue = parseFloat(document.getElementById('input-kkm').value) || 75;
+        const ctx = nilaiCtx(), kkmValue = nilaiKKM();
+        if (!isInit) nilaiSegarkanSemuaBadge();
+        if (!document.getElementById('chartNilai')) return;   // kartu statistik & grafik nilai sudah tidak ditampilkan
         let stdAvgs = [], names = [], scores = [], kkmNames = [];
-        db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => {
-            let sum = 0, count = 0; document.querySelectorAll(`.input-nilai-val[data-sid="${s.StudentID}"]`).forEach(inp => { let val = parseFloat(inp.value); if (!isNaN(val)) { sum += val; count++; } });
-            let avg = count > 0 ? (sum / count) : 0; stdAvgs.push({ name: s.StudentName, avg: avg }); names.push(s.StudentName.split(' ')[0]); scores.push(avg.toFixed(1));
-            if (count > 0 && avg < kkmValue) kkmNames.push(s.StudentName);
+        const daftar = ctx.jenis === 'Formatif' ? nilaiDaftar(ctx) : [];
+        const recs = {}; daftar.forEach(a => { if (!recs[a.m]) recs[a.m] = nilaiBaca(nilaiRecHarian(ctx, a.m)); });
+        const sum = ctx.jenis === 'Formatif' ? null : nilaiBaca(nilaiRecSumatif(ctx, false));
+        absenSiswa(ctx.cid).forEach(s => {
+            const vals = ctx.jenis === 'Formatif' ? daftar.map(a => (recs[a.m].grades[s.StudentID] || [])[a.i]) : [(sum.grades[s.StudentID] || [])[0]];
+            const nums = vals.filter(agIsiNilai).map(parseFloat).filter(n => !isNaN(n));
+            const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+            stdAvgs.push({ name: s.StudentName, avg }); names.push(String(s.StudentName).split(' ')[0]); scores.push(avg.toFixed(1));
+            if (nums.length && avg < kkmValue) kkmNames.push(s.StudentName);
         });
         let highest = stdAvgs.reduce((max, obj) => (obj.avg > max.avg ? obj : max), { name: '-', avg: 0 });
         document.getElementById('stat-nilai-max-name').innerText = highest.avg > 0 ? highest.name : '-'; document.getElementById('stat-nilai-max-val').innerText = highest.avg > 0 ? `Nilai: ${highest.avg.toFixed(1)}` : 'Nilai: 0';
         document.getElementById('stat-nilai-kkm-count').innerText = `${kkmNames.length} Siswa`; document.getElementById('stat-nilai-kkm-names').innerText = kkmNames.length > 0 ? kkmNames.join(', ') : 'Semua tuntas!';
         if (chartPrestasi) chartPrestasi.destroy();
-        chartPrestasi = new Chart(document.getElementById('chartNilai').getContext('2d'), { type: 'bar', data: { labels: names, datasets: [{ label: `Rata-rata ${jenis}`, data: scores, backgroundColor: 'rgba(49, 94, 145, 0.85)', borderColor: '#172B4D', borderWidth: 1, borderRadius: 6 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 100 } } } });
-        if (!isInit) saveNilai(true);
+        const label = ctx.jenis === 'Formatif' ? 'Rata-rata Penilaian Harian (semester ini)' : (ctx.jenis === 'SumatifLM' ? 'Nilai PTS' : 'Nilai PAS');
+        chartPrestasi = new Chart(document.getElementById('chartNilai').getContext('2d'), { type: 'bar', data: { labels: names, datasets: [{ label, data: scores, backgroundColor: 'rgba(49, 94, 145, 0.85)', borderColor: '#172B4D', borderWidth: 1, borderRadius: 6 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 100 } } } });
     }
 
+    // Nilai tersimpan otomatis; fungsi ini dipakai sebelum ekspor untuk memastikan semuanya terkirim.
     function saveNilai(isSilent = false) {
-        const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value, jenis = document.getElementById('nilai-jenis').value, bulan = document.getElementById('nilai-bulan').value;
-        if (!cid || !mapel) { if (!isSilent) Swal.fire('Error', 'Pilih Kelas & Mapel', 'error'); return; }
-        const currentSemester = ['07', '08', '09', '10', '11', '12'].includes(String(bulan)) ? 'ganjil' : 'genap';
-        let customDates = [], customCakupan = [], gradesData = {};
-        if (jenis === 'Formatif') {
-            document.querySelectorAll('.date-nilai-col').forEach(input => customDates.push(input.value)); document.querySelectorAll('.cakupan-nilai-col').forEach(input => customCakupan.push(input.value));
-            db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => { let gArray = []; document.querySelectorAll(`.input-nilai-val[data-sid="${s.StudentID}"]`).forEach(inp => gArray.push(inp.value)); gradesData[s.StudentID] = gArray; });
-        } else { db.students.filter(s => String(s.ClassID) === String(cid)).forEach(s => { let inp = document.querySelector(`.input-nilai-val[data-sid="${s.StudentID}"]`); gradesData[s.StudentID] = [inp ? inp.value : '']; }); }
-
-        let idx = db.grades.findIndex(g => String(g.ClassID) === String(cid) && String(g.Subject) === String(mapel) && String(g.Type) === String(jenis) && (jenis === 'Formatif' ? String(g.MonthYear) === String(bulan) : isGradeMatchingSemester(g, currentSemester)) && matchTapel(g, getActiveTapel()));
-        if (idx >= 0) { 
-            db.grades[idx].Cakupan = JSON.stringify(customCakupan); 
-            db.grades[idx].DatesData = JSON.stringify(customDates); 
-            db.grades[idx].GradesData = JSON.stringify(gradesData); 
-            db.grades[idx].TahunPelajaran = db.grades[idx].TahunPelajaran || getActiveTapel();
-            if (jenis !== 'Formatif') {
-                db.grades[idx].Semester = currentSemester;
-                if (!db.grades[idx].MonthYear) db.grades[idx].MonthYear = currentSemester === 'ganjil' ? '12' : '06';
-            }
-        } else {
-            db.grades.push({ 
-                RecordID: "G" + Date.now(), 
-                ClassID: cid, 
-                Subject: mapel, 
-                Cakupan: JSON.stringify(customCakupan), 
-                Type: jenis, 
-                Semester: currentSemester,
-                TahunPelajaran: getActiveTapel(),
-                MonthYear: jenis === 'Formatif' ? bulan : (currentSemester === 'ganjil' ? '12' : '06'), 
-                DatesData: JSON.stringify(customDates), 
-                GradesData: JSON.stringify(gradesData) 
-            });
-        }
-        syncDB(); if (!isSilent) Swal.fire({ icon: 'success', title: 'Tersimpan', text: 'Data disimpan!', timer: 1500, showConfirmButton: false });
+        if (nilaiSimpanTimer) { clearTimeout(nilaiSimpanTimer); nilaiSimpanTimer = null; }
+        syncDB();
+        if (!isSilent) Swal.fire({ icon: 'success', title: 'Tersimpan', text: 'Data disimpan!', timer: 1500, showConfirmButton: false });
     }
 
     function toggleDownloadNilaiDropdown(e) {
@@ -2513,7 +3029,7 @@ window.AGENDA_GURU_LOADED = true;
         profilLogoBaru = null;
         const form = document.getElementById('form-profil-sekolah');
         if (form && !form.dataset.siap) { form.dataset.siap = '1'; form.addEventListener('input', renderPratinjauKop); }
-        renderPratinjauKop(); renderStatusProfil();
+        renderPratinjauKop(); renderStatusProfil(); renderJenjangRapor();
     }
     function renderStatusProfil() {
         const b = document.getElementById('profil-status-badge'); if (!b) return;
@@ -3037,7 +3553,7 @@ window.AGENDA_GURU_LOADED = true;
         };
         const pts = single('SumatifLM'), pas = single('SumatifAS');
         const olahRec = findNilaiOlahan(cid, mapel, semester, tapel);
-        let kktp = parseFloat(document.getElementById('input-kkm')?.value) || 75;
+        let kktp = nilaiKKM();
         if (olahRec) { try { const st = JSON.parse(olahRec.Pengaturan || '{}'); if (exNum(st.kkm) !== null) kktp = exNum(st.kkm); } catch (e) { } }
 
         const adaNilai = ph.length || stds.some(s => pts(s.StudentID) !== null || pas(s.StudentID) !== null || olahRec);
@@ -3137,13 +3653,12 @@ window.AGENDA_GURU_LOADED = true;
         saveNilai(true);
         const cid = document.getElementById('nilai-kelas').value, mapel = document.getElementById('nilai-mapel').value;
         if (!cid || !mapel) return Swal.fire('Error', 'Pilih kelas & mapel', 'error');
-        const bulanVal = document.getElementById('nilai-bulan')?.value || '07';
-        const sem = ['07', '08', '09', '10', '11', '12'].includes(String(bulanVal)) ? 'ganjil' : 'genap';
+        const sem = getNilaiSemester();
         const tapel = getActiveTapel(), c = db.config || {};
         const kelas = db.classes.find(x => String(x.ClassID) === String(cid))?.ClassName || cid;
         const stds = db.students.filter(s => String(s.ClassID) === String(cid));
         const olahRec = findNilaiOlahan(cid, mapel, sem, tapel);
-        let kktp = parseFloat(document.getElementById('input-kkm')?.value) || 75;
+        let kktp = nilaiKKM();
         if (olahRec) { try { const st = JSON.parse(olahRec.Pengaturan || '{}'); if (exNum(st.kkm) !== null) kktp = exNum(st.kkm); } catch (e) { } }
         Swal.fire({ title: 'Membuat PDF...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         try {
@@ -4446,7 +4961,7 @@ window.AGENDA_GURU_LOADED = true;
         const defaultSem = curMonth >= 7 ? 'ganjil' : 'genap';
 
         const elTapel = document.getElementById('rapor-tapel');
-        if (elTapel && !elTapel.value) elTapel.value = getActiveTapel();
+        if (elTapel) elTapel.value = getActiveTapel();   // selalu mengikuti TP aktif
 
         // HTML memberi nilai bawaan "genap", jadi pakai penanda pilihan guru (bukan cek nilai kosong)
         const elSem = document.getElementById('rapor-semester');
@@ -4498,9 +5013,6 @@ window.AGENDA_GURU_LOADED = true;
         onRaporStudentChange();
     }
 
-    function onRaporStudentChange() {
-        previewRaporSiswa();
-    }
 
     function onRaporPeriodeChange() {
         const tapel = document.getElementById('rapor-tapel')?.value.trim();
@@ -4509,6 +5021,7 @@ window.AGENDA_GURU_LOADED = true;
             syncDB();
         }
         previewRaporSiswa();
+        renderRaporKesiapan();
     }
 
     function focusPilihSiswa() {
@@ -4518,6 +5031,169 @@ window.AGENDA_GURU_LOADED = true;
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
     }
+
+    // =====================================================================
+    // CETAK RAPOR — daftar kesiapan per siswa + pratinjau dengan navigasi ‹ ›.
+    // Isi & format lembar rapor, cetak, dan PDF TIDAK berubah (memakai fungsi yang sama).
+    // Siswa terpilih tetap disimpan di <select id="rapor-siswa"> (tersembunyi).
+    // =====================================================================
+    const RAPOR_CATATAN_BAWAAN = 'Menunjukkan perilaku dan motivasi belajar yang baik, pertahankan dan terus tingkatkan prestasimu!';
+    const RAPOR_CONTOH_CATATAN = [
+        ['Positif', 'Ananda menunjukkan semangat belajar yang baik, aktif bertanya, dan bertanggung jawab. Pertahankan dan terus tingkatkan prestasimu!'],
+        ['Perlu bimbingan', 'Ananda perlu lebih fokus dan teliti dalam belajar. Dukungan dan pendampingan orang tua di rumah akan sangat membantu.'],
+        ['Kehadiran', 'Ananda perlu meningkatkan kehadiran dan kedisiplinan agar tidak tertinggal materi pembelajaran.']
+    ];
+    let raporFilterBelum = false, raporBuka = null, raporLihatHP = false;
+    function raporCtx() {
+        const cid = document.getElementById('rapor-kelas')?.value;
+        return { cid, sem: document.getElementById('rapor-semester')?.value || 'ganjil', tapel: getActiveTapel(), className: db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || '' };
+    }
+    function raporCatatanRec(ctx, sid) {
+        return (db.raporNotes || []).find(n => String(n.StudentID) === String(sid) && String(n.Semester) === String(ctx.sem) && String(n.TahunPelajaran) === String(ctx.tapel));
+    }
+    function raporStatusSiswa(ctx, s) {
+        const g = getStudentAllGrades(ctx.cid, s.StudentID, ctx.sem, ctx.tapel);
+        const isi = g.filter(x => x.finalScore !== null && x.finalScore !== undefined).length;
+        const rec = raporCatatanRec(ctx, s.StudentID);
+        const catatan = !!(rec && String(rec.CatatanWali || '').trim() && String(rec.CatatanWali).trim() !== RAPOR_CATATAN_BAWAAN);
+        const bulan = AG_BULAN_SEM[ctx.sem] || [];
+        let hadir = false;
+        db.attendance.filter(a => String(a.ClassID) === String(ctx.cid) && bulan.includes(String(a.MonthYear)) && matchTapel(a, ctx.tapel)).forEach(a => {
+            const { dates, att } = absenBaca(a); if ((att[s.StudentID] || []).slice(0, dates.length).some(v => ['H', 'S', 'I', 'A'].includes(v))) hadir = true;
+        });
+        const ekskul = getStudentEkskulSummary(s.StudentID, ctx.sem, ctx.tapel).length;
+        const nilai = g.length > 0 && isi === g.length;
+        const kurang = [];
+        if (!nilai) kurang.push(`nilai ${g.length - isi} mapel`);
+        if (!catatan) kurang.push('catatan wali');
+        return { isi, total: g.length, nilai, catatan, hadir, ekskul, siap: nilai && catatan, kurang };
+    }
+    function renderRaporPengaturan() {
+        const box = document.getElementById('rapor-pengaturan'); if (!box) return;
+        const c = db.config || {}, kurang = getPengaturanRaporKurang();
+        const pill = (ok, t) => `<span class="ag-badge ${ok ? 'b-tuntas' : 'b-rendah'}">${ok ? '✓' : '!'} ${escapeHtml(t)}</span>`;
+        box.innerHTML = `<b class="ag-setrow-title">Pengaturan rapor</b>
+            ${pill(true, (getFormatRapor() === 'panduan' ? 'Format Panduan' : 'Format lama') + ' · ' + JENJANG_DEF.find(x => x.k === getJenjang()).label)}
+            ${pill(getFaseKelas(raporCtx().cid) !== '-', 'Fase ' + getFaseKelas(raporCtx().cid))}
+            ${pill(!!c.raporTanggal, c.raporTanggal ? 'Tanggal rapor ' + formatTanggalIndo(c.raporTanggal).replace(/^[^,]+, /, '') : 'Tanggal rapor belum diatur')}
+            ${kurang.length ? kurang.map(k => pill(false, k + ' belum diisi')).join('') : pill(true, 'Data sekolah & penandatangan')}
+            <span class="flex-grow-1"></span>
+            ${kurang.length ? '<button type="button" class="ag-btn ag-btn-primary" onclick="bukaProfilSekolah()">Lengkapi data sekolah</button>' : ''}
+            <button type="button" class="ag-btn" onclick="switchView('profil'); setTimeout(() => document.getElementById('jenjang-rapor-box')?.scrollIntoView({ behavior: 'smooth' }), 200)"><i class="bi bi-mortarboard"></i> Jenjang &amp; format</button>
+            <button type="button" class="ag-btn" onclick="openModalPengaturanRapor()"><i class="bi bi-gear"></i> Tanggal rapor</button>
+            <button type="button" class="ag-btn" onclick="aturKelompokMapel()"><i class="bi bi-diagram-3"></i> Kelompok mapel</button>
+            <button type="button" class="ag-btn" onclick="openBankTPModal()"><i class="bi bi-collection"></i> Bank TP</button>`;
+    }
+    function renderRaporKesiapan() {
+        renderRaporPengaturan();
+        const tp = document.getElementById('rapor-tp-label'); if (tp) tp.textContent = getActiveTapel();
+        const box = document.getElementById('rapor-kesiapan'); if (!box) return;
+        const ctx = raporCtx();
+        const stds = db.students.filter(s => String(s.ClassID) === String(ctx.cid));
+        if (!ctx.cid || !stds.length) { box.innerHTML = `<div class="ag-empty"><i class="bi bi-people"></i><p>${ctx.cid ? 'Belum ada siswa di kelas ini.' : 'Pilih kelas terlebih dahulu.'}</p></div>`; renderRaporNav(); return; }
+        const sel = document.getElementById('rapor-siswa')?.value;
+        const st = {}; stds.forEach(s => st[s.StudentID] = raporStatusSiswa(ctx, s));
+        const siap = stds.filter(s => st[s.StudentID].siap).length;
+        let html = `<div class="ag-steprow"><b class="ag-rapor-sum">${siap} dari ${stds.length} rapor siap</b><span class="ag-hint">Ketuk siswa untuk melihat rapornya</span></div>
+            <div class="ag-progress"><div style="width:${Math.round(siap / stds.length * 100)}%"></div></div>
+            <div class="ag-toolbar">
+                <div class="ag-tabs mb-0" role="group" aria-label="Saring siswa">
+                    <button type="button" class="ag-tab${raporFilterBelum ? '' : ' active'}" aria-pressed="${!raporFilterBelum}" onclick="raporFilterBelum=false; renderRaporKesiapan()">Semua</button>
+                    <button type="button" class="ag-tab${raporFilterBelum ? ' active' : ''}" aria-pressed="${raporFilterBelum}" onclick="raporFilterBelum=true; renderRaporKesiapan()">Belum lengkap (${stds.length - siap})</button>
+                </div>
+                <span class="flex-grow-1"></span>
+                <button type="button" class="ag-btn ag-btn-danger-outline" onclick="raporSemua('pdf')"><i class="bi bi-file-earmark-pdf"></i> PDF semua siswa (${stds.length})</button>
+                <button type="button" class="ag-btn" onclick="raporSemua('cetak')"><i class="bi bi-printer"></i> Cetak semua</button>
+            </div>
+            <div class="ag-list" role="list">`;
+        const tampil = stds.filter(s => !raporFilterBelum || !st[s.StudentID].siap);
+        if (!tampil.length) html += '<p class="ag-empty mb-0">Semua rapor di kelas ini sudah lengkap.</p>';
+        tampil.forEach(s => {
+            const t = st[s.StudentID], on = String(s.StudentID) === String(sel), sid = escapeHtml(s.StudentID);
+            const chip = (ok, txt, netral) => `<span class="ag-badge ag-badge-xs ${ok ? 'b-tuntas' : netral ? 'b-kosong' : 'b-warn'}">${ok ? '✓' : netral ? '–' : '!'} ${txt}</span>`;
+            html += `<div class="ag-raporrow${on ? ' on' : ''}" role="listitem">
+                <button type="button" class="ag-raporbtn" onclick="raporPilihSiswa('${sid}')" aria-current="${on}">
+                    <span class="ag-raporrow-head"><b>${escapeHtml(s.StudentName)}</b><span class="${t.siap ? 't-H' : 't-I'}">${t.siap ? 'Siap' : 'Belum lengkap'}</span></span>
+                    <span class="ag-chips ag-chips-xs">${chip(t.nilai, `Nilai ${t.isi}/${t.total}`)}${chip(t.catatan, 'Catatan wali')}${chip(t.hadir, 'Kehadiran', true)}${chip(t.ekskul > 0, 'Ekskul', true)}</span>
+                </button>`;
+            if (on && raporBuka === String(s.StudentID)) {
+                const rec = raporCatatanRec(ctx, s.StudentID), def = getStudentRaporNotes(s.StudentID, ctx.sem, ctx.tapel, ctx.className);
+                const isiCat = rec ? (rec.CatatanWali || '') : '';
+                html += `<div class="ag-raporedit">
+                    <label class="ag-field">Catatan wali kelas
+                        <textarea class="form-control" rows="3" placeholder="Belum diisi. Jika dibiarkan kosong, rapor memakai kalimat bawaan." onchange="raporSimpanCatatan('${sid}', 'CatatanWali', this.value)">${escapeHtml(isiCat === RAPOR_CATATAN_BAWAAN ? '' : isiCat)}</textarea></label>
+                    <div class="ag-chips ag-chips-sm">${RAPOR_CONTOH_CATATAN.map((c, i) => `<button type="button" class="ag-chip" onclick="raporSimpanCatatan('${sid}', 'CatatanWali', RAPOR_CONTOH_CATATAN[${i}][1])">+ ${c[0]}</button>`).join('')}</div>
+                    ${ctx.sem === 'genap' ? `<label class="ag-field">Keputusan (naik / tinggal kelas)<input type="text" class="form-control" value="${escapeHtml(rec ? (rec.Keputusan || '') : def.keputusan || '')}" onchange="raporSimpanCatatan('${sid}', 'Keputusan', this.value)"></label>` : ''}
+                    <span class="ag-saved"><i class="bi bi-check2-circle"></i> Tersimpan otomatis</span>
+                    <div class="ag-btngrid ag-hp-only"><button type="button" class="ag-btn" onclick="raporLihatHP=true; renderRaporNav(); document.getElementById('rapor-nav').scrollIntoView({behavior:'smooth'})">Lihat lembar rapor</button><button type="button" class="ag-btn ag-btn-pdf" onclick="prosesCetakRaporSiswaPDF()"><i class="bi bi-file-earmark-pdf"></i> Unduh PDF</button></div>
+                </div>`;
+            }
+            html += '</div>';
+        });
+        box.innerHTML = html + '</div>';
+        renderRaporNav(st);
+    }
+    function renderRaporNav(st) {
+        const box = document.getElementById('rapor-nav'); if (!box) return;
+        const ctx = raporCtx(), stds = db.students.filter(s => String(s.ClassID) === String(ctx.cid));
+        const sid = document.getElementById('rapor-siswa')?.value, pos = stds.findIndex(s => String(s.StudentID) === String(sid));
+        if (pos < 0) { box.innerHTML = ''; return; }
+        const s = stds[pos], t = (st && st[s.StudentID]) || raporStatusSiswa(ctx, s);
+        box.innerHTML = `<div class="ag-nav">
+                <button type="button" class="ag-iconbtn" onclick="raporGeser(-1)" aria-label="Siswa sebelumnya"${pos > 0 ? '' : ' disabled'}><i class="bi bi-chevron-left"></i></button>
+                <div class="ag-nav-mid"><div class="ag-nav-sub">Siswa ke-${pos + 1} dari ${stds.length}</div><div class="ag-nav-title">${escapeHtml(s.StudentName)}</div></div>
+                <button type="button" class="ag-iconbtn" onclick="raporGeser(1)" aria-label="Siswa berikutnya"${pos < stds.length - 1 ? '' : ' disabled'}><i class="bi bi-chevron-right"></i></button>
+                <div class="ag-nav-tools">
+                    <button type="button" class="ag-btn ag-rapor-lihat" onclick="raporLihatHP=!raporLihatHP; document.getElementById('rapor-preview-container').classList.toggle('show', raporLihatHP); this.textContent = raporLihatHP ? 'Tutup lembar rapor' : 'Lihat lembar rapor'">${raporLihatHP ? 'Tutup lembar rapor' : 'Lihat lembar rapor'}</button>
+                    <button type="button" class="ag-btn" onclick="cetakRaporBrowser()"><i class="bi bi-printer"></i> Cetak</button>
+                    <button type="button" class="ag-btn ag-btn-pdf" onclick="prosesCetakRaporSiswaPDF()"><i class="bi bi-file-earmark-pdf"></i> Unduh PDF</button>
+                </div>
+            </div>
+            ${t.siap ? '' : `<div class="ag-banner ag-banner-warn"><i class="bi bi-exclamation-circle"></i><span><b>Belum lengkap:</b> ${escapeHtml(t.kurang.join(' dan '))}.</span>
+                ${!t.nilai ? `<button type="button" class="ag-linkbtn" onclick="switchView('nilai')">Buka Data Nilai</button>` : ''}
+                ${!t.catatan ? `<button type="button" class="ag-linkbtn" onclick="raporBuka='${escapeHtml(s.StudentID)}'; renderRaporKesiapan(); document.querySelector('.ag-raporedit textarea')?.focus()">Isi catatan wali</button>` : ''}</div>`}`;
+        document.getElementById('rapor-preview-container')?.classList.toggle('show', raporLihatHP);
+    }
+    function raporPilihSiswa(sid) {
+        const sel = document.getElementById('rapor-siswa'); if (!sel) return;
+        raporBuka = String(sel.value) === String(sid) && raporBuka === String(sid) ? null : String(sid);
+        sel.value = sid; previewRaporSiswa(); renderRaporKesiapan();
+    }
+    function raporGeser(n) {
+        const ctx = raporCtx(), stds = db.students.filter(s => String(s.ClassID) === String(ctx.cid));
+        const sel = document.getElementById('rapor-siswa'), pos = stds.findIndex(s => String(s.StudentID) === String(sel.value)) + n;
+        if (pos < 0 || pos >= stds.length) return;
+        sel.value = stds[pos].StudentID; if (raporBuka) raporBuka = String(stds[pos].StudentID);
+        previewRaporSiswa(); renderRaporKesiapan();
+    }
+    function raporSimpanCatatan(sid, field, val) {
+        const ctx = raporCtx(); if (!ctx.cid) return;
+        if (!db.raporNotes) db.raporNotes = [];
+        let rec = raporCatatanRec(ctx, sid);
+        if (!rec) {
+            const def = getStudentRaporNotes(sid, ctx.sem, ctx.tapel, ctx.className);
+            rec = { RecordID: 'RN' + Date.now(), StudentID: sid, ClassID: ctx.cid, Semester: ctx.sem, TahunPelajaran: ctx.tapel, CatatanWali: def.catatanWali || RAPOR_CATATAN_BAWAAN, Keputusan: def.keputusan || '' };
+            db.raporNotes.push(rec);
+        }
+        let v = String(val || '').trim();
+        if (field === 'CatatanWali' && !v) v = RAPOR_CATATAN_BAWAAN;   // kosong = kembali ke kalimat bawaan
+        rec[field] = v; rec.ClassID = ctx.cid;
+        syncDB(); raporBuka = String(sid); previewRaporSiswa(); renderRaporKesiapan();
+    }
+    // Cetak / PDF seluruh siswa memakai mode "semua siswa" yang sudah ada, lalu kembali ke siswa terpilih
+    function raporSemua(aksi) {
+        const sel = document.getElementById('rapor-siswa'); if (!sel) return;
+        cekPengaturanRapor(async () => {
+            const sebelum = sel.value;
+            sel.value = 'ALL';
+            try {
+                if (aksi === 'pdf') await prosesCetakRaporSiswaPDF(true); else cetakRaporBrowser(true);
+            } finally {
+                sel.value = sebelum; previewRaporSiswa(); renderRaporNav();
+            }
+        });
+    }
+    function onRaporStudentChange() { previewRaporSiswa(); renderRaporKesiapan(); }
 
     // Modal Pengaturan Sekolah & Titimangsa Rapor
     function openModalPengaturanRapor() {
@@ -4540,6 +5216,7 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     function handleSavePengaturanRapor(e) {
+        setTimeout(() => { if (typeof renderRaporPengaturan === "function") renderRaporPengaturan(); }, 50);
         e.preventDefault();
         db.config.raporFase = document.getElementById('setting-rapor-fase').value;
         db.config.raporTanggal = document.getElementById('setting-rapor-tanggal').value;
@@ -4700,6 +5377,7 @@ window.AGENDA_GURU_LOADED = true;
 
             defKeputusan = nextClass === 'LULUS' ? "LULUS" : `NAIK KE ${nextClass}`;
         }
+        if (semester === 'genap') defKeputusan = keputusanBawaan(className) || defKeputusan;
 
         return {
             catatanWali: "Menunjukkan perilaku dan motivasi belajar yang baik, pertahankan dan terus tingkatkan prestasimu!",
@@ -4707,7 +5385,14 @@ window.AGENDA_GURU_LOADED = true;
         };
     }
 
+    // Kelompok mapel di rapor: pilihan guru (db.config.kelompokMapel) didahulukan, jika belum diatur ditebak dari nama mapel
+    const KELOMPOK_MAPEL = [{ v: 'Umum', label: 'Umum / Wajib' }, { v: 'Pilihan', label: 'Pilihan' }, { v: 'Muatan Lokal', label: 'Muatan Lokal' }];
     function getSubjectCategory(subjName) {
+        const atur = db.config && db.config.kelompokMapel ? db.config.kelompokMapel[String(subjName || '').trim()] : '';
+        if (KELOMPOK_MAPEL.some(k => k.v === atur)) return atur;
+        return tebakKelompokMapel(subjName);
+    }
+    function tebakKelompokMapel(subjName) {
         const s = (subjName || '').toLowerCase().trim();
         if (s.includes('seni tari') || s.includes('seni musik') || s.includes('seni rupa') || s.includes('seni teater') || s.includes('pilihan') || s.includes('prakarya')) {
             return 'Pilihan';
@@ -4716,6 +5401,43 @@ window.AGENDA_GURU_LOADED = true;
             return 'Muatan Lokal';
         }
         return 'Umum';
+    }
+
+    // Guru mengatur sendiri kelompok tiap mata pelajaran (format dokumen rapor tidak berubah)
+    async function aturKelompokMapel() {
+        const cid = document.getElementById('rapor-kelas')?.value;
+        const daftar = [...(db.subjects || [])];
+        db.grades.filter(g => !cid || String(g.ClassID) === String(cid)).forEach(g => { if (g.Subject && !daftar.includes(g.Subject)) daftar.push(g.Subject); });
+        if (!daftar.length) return Swal.fire('Belum ada mata pelajaran', 'Tambahkan mata pelajaran di menu Manajemen Kelas › Mata Pelajaran terlebih dahulu.', 'info');
+        const atur = (db.config && db.config.kelompokMapel) || {};
+        const baris = daftar.map((m, i) => {
+            const pilih = getSubjectCategory(m), otomatis = !atur[String(m).trim()];
+            return `<div class="km-row">
+                <div class="km-name">${escapeHtml(m)}${otomatis ? ' <small class="text-muted">(otomatis)</small>' : ''}</div>
+                <div class="btn-group btn-group-sm km-seg" role="group" aria-label="Kelompok ${escapeHtml(m)}">
+                    ${KELOMPOK_MAPEL.map((k, j) => `<input type="radio" class="btn-check" name="km-${i}" id="km-${i}-${j}" value="${k.v}"${pilih === k.v ? ' checked' : ''}>
+                    <label class="btn btn-outline-primary" for="km-${i}-${j}">${k.label}</label>`).join('')}
+                </div></div>`;
+        }).join('');
+        const r = await Swal.fire({
+            title: 'Kelompok mata pelajaran',
+            html: `<p class="small text-muted text-start mb-2">Pilih kelompok setiap mapel. Pengelompokan ini dipakai di tabel nilai rapor (cetak &amp; PDF). Mapel bertanda <i>otomatis</i> belum pernah diatur.</p>
+                <style>.km-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid #EEF1F5;text-align:left}.km-name{font-weight:700;font-size:.9rem;flex:1 1 160px}.km-seg .btn{min-height:38px;font-size:.78rem}</style>
+                <div style="max-height:55vh;overflow:auto">${baris}</div>`,
+            width: 640, showCancelButton: true, showDenyButton: true, denyButtonColor: '#6B7488',
+            confirmButtonText: 'Simpan', denyButtonText: 'Kembalikan otomatis', cancelButtonText: 'Batal',
+            preConfirm: () => {
+                const out = {};
+                daftar.forEach((m, i) => { const el = document.querySelector(`input[name="km-${i}"]:checked`); if (el) out[String(m).trim()] = el.value; });
+                return out;
+            }
+        });
+        if (r.isConfirmed) db.config.kelompokMapel = Object.assign({}, atur, r.value);
+        else if (r.isDenied) delete db.config.kelompokMapel;
+        else return;
+        syncDB();
+        if (typeof previewRaporSiswa === 'function') previewRaporSiswa();
+        Swal.fire({ icon: 'success', title: r.isDenied ? 'Kembali ke pengelompokan otomatis' : 'Kelompok mapel disimpan', timer: 1600, showConfirmButton: false });
     }
 
     function getStudentAllGrades(cid, studentId, semester, tapel) {
@@ -5099,7 +5821,7 @@ window.AGENDA_GURU_LOADED = true;
         const semester = document.getElementById('rapor-semester')?.value || 'genap';
         const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
 
-        const fase = db.config.raporFase || 'D';
+        const fase = getFaseKelas(cid) || 'D';
         const kota = db.config.schoolCity || RAPOR_KOSONG;
         const tglStr = db.config.raporTanggal || tanggalHariIni();
         const sekolah = db.config.userSchool || RAPOR_KOSONG;
@@ -5156,6 +5878,7 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     function generateRaporHtmlSheet(student, className, cid, semester, tapel, fase, kota, tglStr, sekolah, alamat, waliNama, waliNip, kepsekNama, kepsekNip) {
+        if (getFormatRapor() === 'panduan') return generateRaporPanduanSheet(student, className, cid, semester, tapel, kota, tglStr, sekolah, alamat, waliNama, waliNip, kepsekNama, kepsekNip);
         const nis = student.NIS || '-';
         const nisn = student.NISN || '-';
         const nisText = `${nis} / ${nisn}`;
@@ -5411,6 +6134,270 @@ window.AGENDA_GURU_LOADED = true;
         </div>`;
     }
 
+    // =====================================================================
+    // JENJANG SEKOLAH & RAPOR FORMAT PANDUAN (Panduan Pembelajaran dan Asesmen)
+    // db.config.jenjang: 'TK' | 'SD' | 'SMP' | 'SMA' | 'SMK'   db.config.madrasah: true/false
+    // db.config.formatRapor: 'panduan' | 'lama'   db.config.faseARapor: 'angka' | 'deskripsi'
+    // db.config.faseKelas: { ClassID: 'A'..'F' } (hanya bila guru mengubah hasil otomatis)
+    // =====================================================================
+    const JENJANG_DEF = [
+        { k: 'TK', label: 'TK / RA', sub: 'Fase Fondasi', siap: false },
+        { k: 'SD', label: 'SD / MI', sub: 'Fase A–C · kelas 1–6', siap: true },
+        { k: 'SMP', label: 'SMP / MTs', sub: 'Fase D · kelas 7–9', siap: true },
+        { k: 'SMA', label: 'SMA / MA', sub: 'Fase E–F · kelas X–XII', siap: true },
+        { k: 'SMK', label: 'SMK / MAK', sub: 'Fase E–F · kejuruan', siap: false }
+    ];
+    const AG_ROMAWI = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+    function getJenjang() {
+        const j = db.config && db.config.jenjang;
+        if (JENJANG_DEF.some(x => x.k === j)) return j;
+        const f = String(db.config && db.config.raporFase || '').toUpperCase();
+        return f === 'D' ? 'SMP' : (f === 'E' || f === 'F') ? 'SMA' : 'SD';
+    }
+    function getFormatRapor() { return db.config && db.config.formatRapor === 'panduan' ? 'panduan' : 'lama'; }
+    function tingkatKelas(nama) {
+        const s = String(nama || '').toUpperCase();
+        const angka = s.match(/(?:^|[^0-9])(1[0-2]|[1-9])(?![0-9])/);
+        if (angka) return Number(angka[1]);
+        const rom = s.match(/\b(XII|XI|IX|X|VIII|VII|VI|IV|V|III|II|I)\b/);
+        return rom ? AG_ROMAWI.indexOf(rom[1]) : 0;
+    }
+    function faseDariTingkat(n) {
+        if (getJenjang() === 'TK') return 'Fondasi';
+        if (!n) return '';
+        return n <= 2 ? 'A' : n <= 4 ? 'B' : n <= 6 ? 'C' : n <= 9 ? 'D' : n === 10 ? 'E' : 'F';
+    }
+    function faseOtomatisKelas(cid) {
+        const c = db.classes.find(x => String(x.ClassID) === String(cid));
+        return faseDariTingkat(tingkatKelas(c ? c.ClassName : ''));
+    }
+    // Format Panduan memakai fase otomatis per kelas; format lama tetap memakai Fase dari pengaturan rapor
+    function getFaseKelas(cid) {
+        const atur = db.config && db.config.faseKelas ? db.config.faseKelas[cid] : '';
+        if (atur) return atur;
+        if (getFormatRapor() === 'lama') return db.config.raporFase || faseOtomatisKelas(cid) || '-';
+        return faseOtomatisKelas(cid) || db.config.raporFase || '-';
+    }
+    function keputusanBawaan(className) {
+        const n = tingkatKelas(className), j = getJenjang();
+        if (!n) return '';
+        const akhir = j === 'SD' ? 6 : j === 'SMP' ? 9 : (j === 'SMA' || j === 'SMK') ? 12 : 0;
+        if (akhir && n >= akhir) return 'LULUS';
+        return n < 12 ? `NAIK KE KELAS ${AG_ROMAWI[n + 1]}` : '';
+    }
+
+    // ---------- Pengaturan di Profil Sekolah ----------
+    function renderJenjangRapor() {
+        const box = document.getElementById('jenjang-rapor-box'); if (!box) return;
+        const j = getJenjang(), f = getFormatRapor(), c = db.config || {};
+        const kartu = JENJANG_DEF.map(x => {
+            const on = x.k === j;
+            return `<button type="button" class="ag-pcard${on ? ' on' : ''}" aria-pressed="${on}" onclick="aturJenjang('${x.k}')">
+                <b>${x.label}</b><small>${x.sub}</small>
+                <span class="ag-badge ag-badge-xs ${x.siap ? 'b-tuntas' : 'b-warn'}">${x.siap ? 'Format Panduan tersedia' : 'Menunggu contoh rapor'}</span></button>`;
+        }).join('');
+        const fmt = [['panduan', 'Format Panduan Pembelajaran & Asesmen (resmi) — disarankan', 'Istilah Murid & Tahun Ajaran, kokurikuler satu paragraf, ekskul dengan keterangan, tanggapan orang tua, tanda tangan Orang Tua · Kepala Sekolah · Wali Kelas. Halaman 1: nilai, halaman 2: kokurikuler sampai tanda tangan.'],
+            ['lama', 'Format AgendaGuru sebelumnya', 'Format rapor yang dipakai sampai sekarang (dengan kolom Predikat ekskul dan kelompok Umum/Pilihan/Muatan Lokal).']]
+            .map(([k, t, d]) => `<label class="ag-radiocard${f === k ? ' on' : ''}"><input type="radio" name="format-rapor" value="${k}"${f === k ? ' checked' : ''} onchange="aturFormatRapor('${k}')"><span><b>${t}</b><small>${d}</small></span></label>`).join('');
+        const kelasRows = db.classes.map(k => {
+            const auto = faseOtomatisKelas(k.ClassID), atur = c.faseKelas && c.faseKelas[k.ClassID] || '';
+            const opsi = j === 'TK' ? ['Fondasi'] : ['A', 'B', 'C', 'D', 'E', 'F'];
+            return `<div class="ag-faserow"><b>${escapeHtml(k.ClassName)}</b><small>${atur ? 'diatur manual' : (auto ? 'otomatis' : 'tidak terbaca dari nama kelas')}</small>
+                <select class="form-select" aria-label="Fase ${escapeHtml(k.ClassName)}" onchange="aturFaseKelas('${escapeHtml(k.ClassID)}', this.value)">
+                    <option value="">Otomatis${auto ? ' (Fase ' + auto + ')' : ''}</option>
+                    ${opsi.map(o => `<option value="${o}"${atur === o ? ' selected' : ''}>Fase ${o}</option>`).join('')}
+                </select></div>`;
+        }).join('') || '<p class="ag-hint mb-0">Belum ada kelas. Tambahkan kelas di menu Manajemen Kelas.</p>';
+        box.innerHTML = `<div class="card-custom mb-4"><div class="card-body p-4 ag-panel">
+            <h6 class="fw-bold mb-0" style="color: var(--navy-deep);"><i class="bi bi-mortarboard text-primary me-2"></i>Jenjang Sekolah &amp; Format Rapor</h6>
+            <div class="ag-jenjanggrid">${kartu}</div>
+            ${!JENJANG_DEF.find(x => x.k === j).siap ? '<div class="ag-banner ag-banner-warn"><i class="bi bi-info-circle"></i><span>Format rapor khusus jenjang ini sedang disiapkan. Sementara itu rapor memakai susunan SD/SMP.</span></div>' : ''}
+            <label class="ag-checkline"><input type="checkbox" ${c.madrasah ? 'checked' : ''} onchange="db.config.madrasah=this.checked; syncDB()"> Madrasah di bawah Kemenag (MI/MTs/MA) <span class="ag-hint">· format khusus Kemenag menyusul</span></label>
+            <div class="ag-steptitle mt-2">Format rapor</div>
+            <div class="ag-panel">${fmt}</div>
+            ${j === 'SD' ? `<div class="ag-steptitle mt-2">Rapor kelas 1–2 (Fase A)</div>
+                <div class="ag-chips">
+                    <button type="button" class="ag-chip${c.faseARapor !== 'deskripsi' ? ' on' : ''}" onclick="db.config.faseARapor='angka'; syncDB(); renderJenjangRapor()">Nilai angka + capaian</button>
+                    <button type="button" class="ag-chip${c.faseARapor === 'deskripsi' ? ' on' : ''}" onclick="db.config.faseARapor='deskripsi'; syncDB(); renderJenjangRapor()">Capaian saja (tanpa angka)</button>
+                </div><p class="ag-hint mb-0">Sesuai Panduan, rapor Fase A boleh berisi deskripsi capaian tanpa angka. Berlaku pada format Panduan.</p>` : ''}
+            ${j === 'SMA' ? `<p class="ag-hint mb-0"><b>Kelas XI–XII:</b> tabel nilai dibagi <b>A. Kelompok Mata Pelajaran Wajib</b> dan <b>B. Kelompok Mata Pelajaran Pilihan</b>. Atur mapel pilihan lewat tombol <i>Kelompok mapel</i> di Cetak Rapor. Mapel pilihan hanya tampil di rapor murid yang punya nilainya.</p>` : ''}
+            <div class="ag-steprow mt-2"><div class="ag-steptitle">Fase per kelas</div><span class="ag-hint">Terisi otomatis dari nama kelas, bisa diubah</span></div>
+            <div>${kelasRows}</div>
+        </div></div>`;
+    }
+    function aturJenjang(k) {
+        db.config.jenjang = k;
+        const f = { SD: '', SMP: 'D', SMA: 'E', SMK: 'E', TK: '' }[k];
+        if (f) db.config.raporFase = f;
+        syncDB(); renderJenjangRapor();
+    }
+    function aturFormatRapor(k) { db.config.formatRapor = k; syncDB(); renderJenjangRapor(); }
+    function aturFaseKelas(cid, v) {
+        if (!db.config.faseKelas || typeof db.config.faseKelas !== 'object') db.config.faseKelas = {};
+        if (v) db.config.faseKelas[cid] = v; else delete db.config.faseKelas[cid];
+        syncDB(); renderJenjangRapor();
+    }
+
+    // ---------- Lembar rapor format Panduan (pratinjau & cetak) ----------
+    function raporPanduanData(student, cid, semester, tapel, className) {
+        const allGrades = getStudentAllGrades(cid, student.StudentID, semester, tapel);
+        const j = getJenjang(), n = tingkatKelas(className), fase = getFaseKelas(cid);
+        const tanpaAngka = j === 'SD' && fase === 'A' && db.config.faseARapor === 'deskripsi';
+        const smaLanjut = (j === 'SMA' || j === 'SMK') && n >= 11;
+        const ada = g => g.hasScore && g.finalScore !== null && g.finalScore !== undefined;
+        const umum = allGrades.filter(g => g.category !== 'Pilihan' && g.category !== 'Muatan Lokal');
+        const pilihan = allGrades.filter(g => g.category === 'Pilihan' && (!smaLanjut || ada(g)));
+        const mulok = allGrades.filter(g => g.category === 'Muatan Lokal');
+        const kelompok = [];
+        const label = smaLanjut ? ['A. Kelompok Mata Pelajaran Wajib', 'B. Kelompok Mata Pelajaran Pilihan', 'C. Muatan Lokal'] : ['A. Mata Pelajaran Umum', 'B. Mata Pelajaran Pilihan', 'C. Muatan Lokal'];
+        const banyak = [umum, pilihan, mulok].filter(x => x.length).length > 1 || smaLanjut;
+        [[umum, label[0]], [pilihan, label[1]], [mulok, label[2]]].forEach(([list, t]) => { if (list.length || (smaLanjut && t === label[1])) kelompok.push({ judul: banyak ? t : '', list }); });
+        const koku = getStudentKokuSummary(cid, student.StudentID, semester);
+        const kokuTeks = koku.hasData ? koku.items.map(i => i.narasi).filter(Boolean).join(' ') : '-';
+        const ekskul = getStudentEkskulSummary(student.StudentID, semester, tapel).map(e => {
+            const ket = String(e.Keterangan || '').trim();
+            return { nama: e.NamaEkskul, ket: (e.Predikat ? e.Predikat + (ket ? ', ' + ket.charAt(0).toLowerCase() + ket.slice(1) : '') : ket) || '-' };
+        });
+        return {
+            tanpaAngka, kelompok, kokuTeks, ekskul, fase,
+            att: getStudentAttendanceSummary(cid, student.StudentID, semester, tapel),
+            notes: getStudentRaporNotes(student.StudentID, semester, tapel, className)
+        };
+    }
+    function generateRaporPanduanSheet(student, className, cid, semester, tapel, kota, tglStr, sekolah, alamat, waliNama, waliNip, kepsekNama, kepsekNip) {
+        const d = raporPanduanData(student, cid, semester, tapel, className);
+        const tgl = formatTanggalIndo(tglStr).replace(/^[A-Za-z]+,\s*/, '');
+        const sel = 'border:1px solid #000; padding:5px 6px; vertical-align:top;';
+        const th = 'border:1px solid #000; padding:6px; background:#C9C9C9; font-weight:bold; text-align:center;';
+        const kol = d.tanpaAngka ? 3 : 4;
+        let no = 0, baris = '';
+        d.kelompok.forEach(k => {
+            if (k.judul) baris += `<tr><td colspan="${kol}" style="${sel} font-weight:bold;">${escapeHtml(k.judul)}</td></tr>`;
+            if (!k.list.length) baris += `<tr><td colspan="${kol}" style="${sel} color:#555; font-style:italic;">Belum ada mata pelajaran pilihan yang dinilai.</td></tr>`;
+            k.list.forEach((g, i) => {
+                no++;
+                const nilai = g.hasScore && g.finalScore !== null ? String(g.finalScore) : '-';
+                const cap = g.capaian ? String(g.capaian).split('\n').filter(x => x.trim()).map(x => `<div style="margin-bottom:3px;">${escapeHtml(x)}</div>`).join('') : '-';
+                baris += `<tr style="break-inside:avoid; page-break-inside:avoid;"><td style="${sel} text-align:center;">${k.judul ? (i + 1) + '.' : no}</td><td style="${sel}">${escapeHtml(g.subject)}</td>${d.tanpaAngka ? '' : `<td style="${sel} text-align:center; font-weight:bold;">${nilai}</td>`}<td style="${sel}">${cap}</td></tr>`;
+            });
+        });
+        if (!no && !d.kelompok.some(k => k.judul)) baris = `<tr><td colspan="${kol}" style="${sel} text-align:center; font-style:italic;">Belum ada mata pelajaran atau nilai tercatat.</td></tr>`;
+        const ident = (a, b) => `<div style="display:flex;"><span style="width:96px; font-weight:bold;">${a}</span><span>: ${escapeHtml(b)}</span></div>`;
+        const font = "font-family: Arial, Helvetica, sans-serif; font-size:11px; line-height:1.45; color:#000;";
+        const att = d.att, hr = v => att.hasRecords ? v + ' hari' : '. . . hari';
+        const genap = semester === 'genap';
+        return `
+        <div class="rapor-paper-sheet rapor-panduan"><div style="${font}">
+            <div style="text-align:center; font-weight:bold; font-size:13px; letter-spacing:.5px; margin-bottom:14px;">LAPORAN HASIL BELAJAR</div>
+            <div style="display:flex; justify-content:space-between; gap:16px; margin-bottom:14px;">
+                <div style="width:55%;">${ident('Nama Murid', student.StudentName)}${ident('NISN', student.NISN || '-')}${ident('Sekolah', sekolah)}${ident('Alamat', alamat)}</div>
+                <div style="width:42%;">${ident('Kelas', className)}${ident('Fase', d.fase)}${ident('Semester', semester === 'ganjil' ? '1 (Ganjil)' : '2 (Genap)')}${ident('Tahun Ajaran', tapel)}</div>
+            </div>
+            <table style="width:100%; border-collapse:collapse;">
+                <thead><tr><th style="${th} width:7%;">No.</th><th style="${th} width:${d.tanpaAngka ? 30 : 27}%;">Mata Pelajaran</th>${d.tanpaAngka ? '' : `<th style="${th} width:10%;">Nilai Akhir</th>`}<th style="${th}">Capaian Kompetensi</th></tr></thead>
+                <tbody>${baris}</tbody>
+            </table>
+        </div></div>
+        <div class="rapor-paper-sheet rapor-panduan"><div style="${font} break-inside:avoid; page-break-inside:avoid;">
+            <table style="width:100%; border-collapse:collapse; margin-bottom:14px;"><tr><th style="${th}">Kokurikuler</th></tr><tr><td style="${sel} text-align:justify; padding:8px;">${escapeHtml(d.kokuTeks)}</td></tr></table>
+            <table style="width:100%; border-collapse:collapse; margin-bottom:14px;">
+                <tr><th style="${th} width:7%;">No.</th><th style="${th} width:27%;">Ekstrakurikuler</th><th style="${th}">Keterangan</th></tr>
+                ${d.ekskul.length ? d.ekskul.map((e, i) => `<tr><td style="${sel} text-align:center;">${i + 1}</td><td style="${sel}">${escapeHtml(e.nama)}</td><td style="${sel}">${escapeHtml(e.ket)}</td></tr>`).join('')
+                    : `<tr><td style="${sel} text-align:center;">-</td><td style="${sel}">-</td><td style="${sel}">-</td></tr>`}
+            </table>
+            <div style="display:flex; gap:32px; align-items:flex-start; margin-bottom:14px;">
+                <table style="width:38%; border-collapse:collapse;">
+                    <tr><th colspan="2" style="${th}">Ketidakhadiran</th></tr>
+                    <tr><td style="${sel}">Sakit</td><td style="${sel} text-align:right; white-space:nowrap;">${hr(att.S)}</td></tr>
+                    <tr><td style="${sel}">Izin</td><td style="${sel} text-align:right; white-space:nowrap;">${hr(att.I)}</td></tr>
+                    <tr><td style="${sel}">Tanpa Keterangan</td><td style="${sel} text-align:right; white-space:nowrap;">${hr(att.A)}</td></tr>
+                </table>
+                <table style="flex:1; border-collapse:collapse;"><tr><th style="${th}">Catatan Wali Kelas</th></tr><tr><td style="${sel} height:62px; padding:8px;">${escapeHtml(d.notes.catatanWali || '')}</td></tr></table>
+            </div>
+            ${genap ? `<table style="width:100%; border-collapse:collapse; margin-bottom:14px;"><tr><th style="${th}">Keputusan</th></tr><tr><td style="${sel} padding:8px;">Berdasarkan pencapaian seluruh kompetensi, murid dinyatakan: <b>${escapeHtml(d.notes.keputusan || keputusanBawaan(className) || 'NAIK KELAS')}</b></td></tr></table>` : ''}
+            <table style="width:100%; border-collapse:collapse; margin-bottom:22px;"><tr><th style="${th}">Tanggapan Orang Tua/Wali Murid</th></tr><tr><td style="border:1px solid #000; height:78px;"></td></tr></table>
+            <div style="display:flex; justify-content:space-between; text-align:center; font-size:11.5px;">
+                <div style="width:32%;"><div style="height:17px;"></div><b>Orang Tua Murid</b><div style="height:62px;"></div><div>(..................................)</div></div>
+                <div style="width:32%;"><div style="height:17px;"></div><b>Kepala Sekolah</b><div style="height:62px;"></div><div style="font-weight:bold; text-decoration:underline;">${escapeHtml(kepsekNama)}</div><div>${kepsekNip && kepsekNip !== '-' ? 'NIP. ' + escapeHtml(kepsekNip) : '&nbsp;'}</div></div>
+                <div style="width:32%;"><div style="height:17px;">${escapeHtml(kota)}, ${escapeHtml(tgl)}</div><b>Wali Kelas</b><div style="height:62px;"></div><div style="font-weight:bold; text-decoration:underline;">${escapeHtml(waliNama)}</div><div>${waliNip && waliNip !== '-' ? 'NIP. ' + escapeHtml(waliNip) : '&nbsp;'}</div></div>
+            </div>
+        </div></div>`;
+    }
+
+    // ---------- PDF format Panduan (2 halaman per murid) ----------
+    function pdfRaporPanduan(doc, student, o) {
+        const d = raporPanduanData(student, o.cid, o.semester, o.tapel, o.className);
+        const tgl = formatTanggalIndo(o.tglStr).replace(/^[A-Za-z]+,\s*/, '');
+        const head = { fillColor: [201, 201, 201], textColor: [0, 0, 0], fontStyle: 'bold', font: 'helvetica', fontSize: 8.5, halign: 'center', valign: 'middle', lineColor: [0, 0, 0], lineWidth: 0.25 };
+        const sty = { font: 'helvetica', fontSize: 8, textColor: [0, 0, 0], cellPadding: 1.8, overflow: 'linebreak', lineColor: [0, 0, 0], lineWidth: 0.25, valign: 'top' };
+        // Halaman 1: identitas + nilai
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0, 0, 0);
+        doc.text('LAPORAN HASIL BELAJAR', 105, 18, { align: 'center' });
+        doc.setFontSize(8.5);
+        const kiri = [['Nama Murid', student.StudentName], ['NISN', student.NISN || '-'], ['Sekolah', o.sekolah], ['Alamat', o.alamat]];
+        const kanan = [['Kelas', o.className], ['Fase', d.fase], ['Semester', o.semester === 'ganjil' ? '1 (Ganjil)' : '2 (Genap)'], ['Tahun Ajaran', o.tapel]];
+        kiri.forEach((r, i) => { const y = 27 + i * 4.8; doc.setFont('helvetica', 'bold'); doc.text(r[0], 15, y); doc.setFont('helvetica', 'normal'); doc.text(': ' + doc.splitTextToSize(String(r[1]), 68)[0], 38, y); });
+        kanan.forEach((r, i) => { const y = 27 + i * 4.8; doc.setFont('helvetica', 'bold'); doc.text(r[0], 120, y); doc.setFont('helvetica', 'normal'); doc.text(': ' + String(r[1]), 143, y); });
+        const body = [];
+        let no = 0;
+        const kol = d.tanpaAngka ? 3 : 4;
+        d.kelompok.forEach(k => {
+            if (k.judul) body.push([{ content: k.judul, colSpan: kol, styles: { fontStyle: 'bold' } }]);
+            if (!k.list.length) body.push([{ content: 'Belum ada mata pelajaran pilihan yang dinilai.', colSpan: kol, styles: { fontStyle: 'italic' } }]);
+            k.list.forEach((g, i) => {
+                no++;
+                const nilai = g.hasScore && g.finalScore !== null ? String(g.finalScore) : '-';
+                const row = [k.judul ? (i + 1) + '.' : String(no), g.subject];
+                if (!d.tanpaAngka) row.push({ content: nilai, styles: { fontStyle: 'bold', halign: 'center' } });
+                row.push(g.capaian || '-');
+                body.push(row);
+            });
+        });
+        if (!body.length) body.push([{ content: 'Belum ada mata pelajaran atau nilai tercatat.', colSpan: kol, styles: { halign: 'center', fontStyle: 'italic' } }]);
+        doc.autoTable({
+            head: [d.tanpaAngka ? ['No.', 'Mata Pelajaran', 'Capaian Kompetensi'] : ['No.', 'Mata Pelajaran', 'Nilai Akhir', 'Capaian Kompetensi']],
+            body, startY: 49, theme: 'grid', headStyles: head, styles: sty, rowPageBreak: 'avoid', showHead: 'everyPage',
+            columnStyles: d.tanpaAngka ? { 0: { cellWidth: 11, halign: 'center' }, 1: { cellWidth: 52 }, 2: { cellWidth: 117 } }
+                : { 0: { cellWidth: 11, halign: 'center' }, 1: { cellWidth: 46 }, 2: { cellWidth: 17 }, 3: { cellWidth: 106 } },
+            margin: { left: 15, right: 15, top: 15, bottom: 15 }
+        });
+        // Halaman 2: kokurikuler sampai tanda tangan (selalu halaman baru)
+        doc.addPage();
+        doc.autoTable({ head: [['Kokurikuler']], body: [[d.kokuTeks]], startY: 18, theme: 'grid', headStyles: head, styles: Object.assign({}, sty, { cellPadding: 2.4 }), margin: { left: 15, right: 15 } });
+        let y = doc.lastAutoTable.finalY + 5;
+        doc.autoTable({
+            head: [['No.', 'Ekstrakurikuler', 'Keterangan']],
+            body: d.ekskul.length ? d.ekskul.map((e, i) => [String(i + 1), e.nama, e.ket]) : [['-', '-', '-']],
+            startY: y, theme: 'grid', headStyles: head, styles: sty,
+            columnStyles: { 0: { cellWidth: 11, halign: 'center' }, 1: { cellWidth: 46 }, 2: { cellWidth: 123 } }, margin: { left: 15, right: 15 }
+        });
+        y = doc.lastAutoTable.finalY + 5;
+        const att = d.att, hr = v => att.hasRecords ? v + ' hari' : '. . . hari';
+        doc.autoTable({
+            head: [[{ content: 'Ketidakhadiran', colSpan: 2 }]], body: [['Sakit', hr(att.S)], ['Izin', hr(att.I)], ['Tanpa Keterangan', hr(att.A)]],
+            startY: y, theme: 'grid', headStyles: head, styles: sty, columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 26, halign: 'right' } }, margin: { left: 15, right: 129 }
+        });
+        const yA = doc.lastAutoTable.finalY;
+        doc.autoTable({ head: [['Catatan Wali Kelas']], body: [[d.notes.catatanWali || '']], startY: y, theme: 'grid', headStyles: head, styles: Object.assign({}, sty, { cellPadding: 2.4, minCellHeight: 19 }), margin: { left: 92, right: 15 } });
+        y = Math.max(yA, doc.lastAutoTable.finalY) + 5;
+        if (o.semester === 'genap') {
+            doc.autoTable({ head: [['Keputusan']], body: [[`Berdasarkan pencapaian seluruh kompetensi, murid dinyatakan: ${d.notes.keputusan || keputusanBawaan(o.className) || 'NAIK KELAS'}`]], startY: y, theme: 'grid', headStyles: head, styles: Object.assign({}, sty, { cellPadding: 2.4 }), margin: { left: 15, right: 15 } });
+            y = doc.lastAutoTable.finalY + 5;
+        }
+        doc.autoTable({ head: [['Tanggapan Orang Tua/Wali Murid']], body: [['']], startY: y, theme: 'grid', headStyles: head, styles: Object.assign({}, sty, { minCellHeight: 22 }), margin: { left: 15, right: 15 } });
+        const sy = doc.lastAutoTable.finalY + 8;
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
+        doc.text(`${o.kota}, ${tgl}`, 165, sy, { align: 'center' });
+        doc.setFont('helvetica', 'bold');
+        [['Orang Tua Murid', 45], ['Kepala Sekolah', 105], ['Wali Kelas', 165]].forEach(([t, x]) => doc.text(t, x, sy + 5, { align: 'center' }));
+        doc.setFont('helvetica', 'normal'); doc.text('(..................................)', 45, sy + 27, { align: 'center' });
+        [[o.kepsekNama, o.kepsekNip, 105], [o.waliNama, o.waliNip, 165]].forEach(([nm, nip, x]) => {
+            doc.setFont('helvetica', 'bold'); doc.text(String(nm), x, sy + 27, { align: 'center' });
+            const w = doc.getTextWidth(String(nm)); doc.setLineWidth(0.2); doc.line(x - w / 2, sy + 27.8, x + w / 2, sy + 27.8);
+            doc.setFont('helvetica', 'normal'); if (nip && nip !== '-') doc.text('NIP. ' + nip, x, sy + 31.5, { align: 'center' });
+        });
+    }
+
     function cetakRaporBrowser(lewatiCekPengaturan) {
         const cid = document.getElementById('rapor-kelas')?.value;
         if (!cid) return Swal.fire('Peringatan', 'Silakan pilih kelas terlebih dahulu.', 'warning');
@@ -5491,7 +6478,7 @@ window.AGENDA_GURU_LOADED = true;
         const semester = document.getElementById('rapor-semester')?.value || 'genap';
         const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
 
-        const fase = db.config.raporFase || 'D';
+        const fase = getFaseKelas(cid) || 'D';
         const kota = db.config.schoolCity || RAPOR_KOSONG;
         const tglStr = db.config.raporTanggal || tanggalHariIni();
         const sekolah = db.config.userSchool || RAPOR_KOSONG;
@@ -5532,6 +6519,7 @@ window.AGENDA_GURU_LOADED = true;
 
             targetStudents.forEach((student, sIdx) => {
                 if (sIdx > 0) doc.addPage();
+                if (getFormatRapor() === 'panduan') { pdfRaporPanduan(doc, student, { cid, semester, tapel, className, kota, tglStr, sekolah, alamat, waliNama, waliNip, kepsekNama, kepsekNip }); return; }
 
                 const nis = student.NIS || '-';
                 const nisn = student.NISN || '-';
@@ -5919,124 +6907,179 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // --- Nilai Ekstrakurikuler Siswa (Terhubung ke Rapor) ---
-    function switchEkskulTab(tab) {
-        const subInput = document.getElementById('ekskul-subview-input');
-        const subRiwayat = document.getElementById('ekskul-subview-riwayat');
-        const btnInput = document.getElementById('btn-tab-ekskul-input');
-        const btnRiwayat = document.getElementById('btn-tab-ekskul-riwayat');
-        if (!subInput || !subRiwayat) return;
-
-        if (tab === 'riwayat') {
-            subInput.style.display = 'none';
-            subRiwayat.style.display = 'block';
-            if (btnInput) { btnInput.classList.remove('btn-primary'); btnInput.classList.add('btn-outline-primary'); }
-            if (btnRiwayat) { btnRiwayat.classList.remove('btn-outline-primary'); btnRiwayat.classList.add('btn-primary'); }
-            renderEkskulHistory();
-        } else {
-            subInput.style.display = 'block';
-            subRiwayat.style.display = 'none';
-            if (btnInput) { btnInput.classList.remove('btn-outline-primary'); btnInput.classList.add('btn-primary'); }
-            if (btnRiwayat) { btnRiwayat.classList.remove('btn-primary'); btnRiwayat.classList.add('btn-outline-primary'); }
-        }
+    // =====================================================================
+    // NILAI EKSTRAKURIKULER — satu kegiatan per layar, semua siswa kelas di daftar ke bawah.
+    // Struktur data TIDAK berubah: db.ekskul berisi satu baris per siswa per kegiatan
+    // { EkskulID, ClassID, StudentID, StudentName, Semester, TahunPelajaran, NamaEkskul, Predikat, Keterangan }.
+    // =====================================================================
+    const EKSKUL_PRED = [
+        { k: 'Sangat Baik', s: 'SB', cls: 'st-H' }, { k: 'Baik', s: 'B', cls: 'st-S' },
+        { k: 'Cukup', s: 'C', cls: 'st-I' }, { k: 'Kurang', s: 'K', cls: 'st-A' }
+    ];
+    const EKSKUL_PRESET = ['Pramuka', 'PMR (Palang Merah Remaja)', 'Paskibra', 'Seni Tari', 'Futsal', 'Bola Basket', 'Bulutangkis', 'Rohis / Keagamaan',
+        'Drumband / Marching Band', 'Pencak Silat / Bela Diri', 'English Club', 'Sains Club / KIR', 'Paduan Suara / Seni Musik', 'Seni Rupa / Menggambar', 'Jurnalistik', 'Robotik / Komputer'];
+    function ekskulNarasi(pred, kegiatan) {
+        return ({
+            'Sangat Baik': `Sangat aktif dan menunjukkan kepemimpinan yang baik dalam kegiatan ${kegiatan}.`,
+            'Baik': `Aktif dan rutin mengikuti kegiatan ${kegiatan} dengan baik.`,
+            'Cukup': `Cukup aktif mengikuti kegiatan ${kegiatan}, perlu meningkatkan kehadiran dan keaktifan.`,
+            'Kurang': `Perlu bimbingan dan motivasi agar lebih aktif dalam kegiatan ${kegiatan}.`
+        })[pred] || '';
     }
+    let ekskulKegiatan = '', ekskulTambahan = [], ekskulFormLain = false, ekskulCatatanBuka = {}, ekskulCari = '';
 
+    function switchEkskulTab(tab) {
+        const r = tab === 'riwayat';
+        document.getElementById('ekskul-subview-input').style.display = r ? 'none' : '';
+        document.getElementById('ekskul-subview-riwayat').style.display = r ? 'block' : 'none';
+        document.getElementById('btn-tab-ekskul-input').classList.toggle('active', !r);
+        document.getElementById('btn-tab-ekskul-riwayat').classList.toggle('active', r);
+        if (r) {
+            const k = document.getElementById('ekskul-riwayat-kelas'), s = document.getElementById('ekskul-riwayat-semester');
+            if (k) k.value = document.getElementById('ekskul-kelas').value;
+            if (s) s.value = document.getElementById('ekskul-semester').value;
+            renderEkskulHistory();
+        } else renderEkskulInput();
+    }
     function loadEkskulData() {
         populateClassSelects();
-        onEkskulClassChange();
-        const curDate = new Date();
-        const curYear = curDate.getFullYear();
-        const curMonth = curDate.getMonth() + 1;
-        const academicYear = curMonth >= 7 ? `${curYear}/${curYear + 1}` : `${curYear - 1}/${curYear}`;
-        const defaultSem = curMonth >= 7 ? 'ganjil' : 'genap';
-        if (document.getElementById('ekskul-tapel') && !document.getElementById('ekskul-tapel').value) {
-            document.getElementById('ekskul-tapel').value = getActiveTapel(); // ikut TP yang dipilih di atas
-        }
-        const elEkskulRiwayatSem = document.getElementById('ekskul-riwayat-semester');
-        if (elEkskulRiwayatSem && !elEkskulRiwayatSem.dataset.userSet) elEkskulRiwayatSem.value = defaultSem;
-        const elEkskulSem = document.getElementById('ekskul-semester');
-        if (elEkskulSem && !elEkskulSem.dataset.userSet) {
-            elEkskulSem.value = defaultSem;
-        }
+        const el = document.getElementById('ekskul-semester');
+        if (el && !el.dataset.userSet) el.value = semesterDariTanggal(agTglHariIni());
+        const tp = document.getElementById('ekskul-tp-label'); if (tp) tp.textContent = 'TP ' + getActiveTapel();
+        const dl = document.getElementById('list-ekskul-preset'); if (dl && !dl.options.length) dl.innerHTML = EKSKUL_PRESET.map(p => `<option value="${escapeHtml(p)}">`).join('');
+        renderEkskulInput();
     }
-
-    // Semester yang dipilih sendiri oleh guru tidak ditimpa lagi oleh nilai bawaan
-    document.addEventListener('change', e => {
-        if (e.target && (e.target.id === 'rapor-semester' || e.target.id === 'ekskul-semester' || e.target.id === 'ekskul-riwayat-semester')) e.target.dataset.userSet = '1';
-    });
-
-    function onEkskulClassChange() {
-        const cid = document.getElementById('ekskul-kelas')?.value;
-        const selectSiswa = document.getElementById('ekskul-siswa');
-        if (!selectSiswa) return;
-        const stds = db.students.filter(s => String(s.ClassID) === String(cid));
-        let html = '<option value="">-- Pilih Siswa --</option>';
-        stds.forEach(s => {
-            html += `<option value="${s.StudentID}">${escapeHtml(s.StudentName)}</option>`;
-        });
-        selectSiswa.innerHTML = html;
-    }
-
-    function setEkskulTemplate(text) {
-        const el = document.getElementById('ekskul-keterangan');
-        if (el) el.value = text;
-    }
-
-    function saveEkskul() {
-        const editId = document.getElementById('ekskul-edit-id')?.value;
-        const cid = document.getElementById('ekskul-kelas')?.value;
-        const sid = document.getElementById('ekskul-siswa')?.value;
-        const semester = document.getElementById('ekskul-semester')?.value || 'genap';
-        const tapel = document.getElementById('ekskul-tapel')?.value.trim() || getActiveTapel();
-        const nama = document.getElementById('ekskul-nama')?.value.trim();
-        const predikat = document.getElementById('ekskul-predikat')?.value || 'Baik';
-        const keterangan = document.getElementById('ekskul-keterangan')?.value.trim();
-
-        if (!cid) return Swal.fire('Peringatan', 'Silakan pilih kelas terlebih dahulu.', 'warning');
-        if (!sid) return Swal.fire('Peringatan', 'Silakan pilih siswa yang dinilai.', 'warning');
-        if (!nama) return Swal.fire('Peringatan', 'Silakan isi nama kegiatan ekstrakurikuler (cth: Pramuka).', 'warning');
-
-        const student = db.students.find(s => String(s.StudentID) === String(sid));
-        const studentName = student ? student.StudentName : '-';
-
+    function onEkskulClassChange() { ekskulCatatanBuka = {}; renderEkskulInput(); }
+    function ekskulCtx() { return { cid: document.getElementById('ekskul-kelas')?.value, sem: document.getElementById('ekskul-semester')?.value || 'ganjil', tapel: getActiveTapel() }; }
+    function ekskulSama(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
+    function ekskulRec(ctx) {
         if (!db.ekskul) db.ekskul = [];
+        return db.ekskul.filter(e => String(e.ClassID) === String(ctx.cid) && String(e.Semester).toLowerCase() === ctx.sem &&
+            (!e.TahunPelajaran || String(e.TahunPelajaran).trim() === ctx.tapel));
+    }
 
-        if (editId) {
-            const idx = db.ekskul.findIndex(e => String(e.EkskulID) === String(editId));
-            if (idx > -1) {
-                db.ekskul[idx].ClassID = cid;
-                db.ekskul[idx].StudentID = sid;
-                db.ekskul[idx].StudentName = studentName;
-                db.ekskul[idx].Semester = semester;
-                db.ekskul[idx].TahunPelajaran = tapel;
-                db.ekskul[idx].NamaEkskul = nama;
-                db.ekskul[idx].Predikat = predikat;
-                db.ekskul[idx].Keterangan = keterangan;
-            }
-            cancelEditEkskul();
-            Swal.fire('Berhasil!', 'Data nilai ekstrakurikuler berhasil diperbarui.', 'success');
+    function renderEkskulInput() {
+        const box = document.getElementById('ekskul-subview-input'); if (!box) return;
+        const ctx = ekskulCtx(), tp = document.getElementById('ekskul-tp-label'); if (tp) tp.textContent = 'TP ' + ctx.tapel;
+        if (!ctx.cid) { box.innerHTML = '<div class="card-custom"><div class="card-body"><div class="alert alert-secondary text-center mb-0">Pilih kelas terlebih dahulu.</div></div></div>'; return; }
+        const stds = absenSiswa(ctx.cid);
+        if (!stds.length) { box.innerHTML = '<div class="card-custom"><div class="card-body"><div class="alert alert-secondary text-center mb-0">Belum ada siswa di kelas ini. Tambahkan siswa di menu Manajemen Kelas.</div></div></div>'; return; }
+        const recs = ekskulRec(ctx);
+        const nama = [];
+        recs.forEach(e => { if (e.NamaEkskul && !nama.some(n => ekskulSama(n, e.NamaEkskul))) nama.push(e.NamaEkskul); });
+        ekskulTambahan.forEach(n => { if (!nama.some(x => ekskulSama(x, n))) nama.push(n); });
+        const jumlah = n => new Set(recs.filter(e => ekskulSama(e.NamaEkskul, n)).map(e => String(e.StudentID))).size;
+        if (!nama.some(n => ekskulSama(n, ekskulKegiatan))) ekskulKegiatan = nama.slice().sort((a, b) => jumlah(b) - jumlah(a))[0] || '';
+        const kg = ekskulKegiatan;
+
+        let html = '<div class="card-custom"><div class="card-body ag-panel">';
+        html += `<div class="ag-steptitle">Kegiatan</div><div class="ag-chips">`;
+        nama.forEach(n => {
+            const on = ekskulSama(n, kg);
+            html += `<button type="button" class="ag-chip${on ? ' on' : ''}" aria-pressed="${on}" onclick="ekskulPilihKegiatan(this.dataset.k)" data-k="${escapeHtml(n)}">${escapeHtml(n)} <small>${jumlah(n)} siswa</small></button>`;
+        });
+        html += `<button type="button" class="ag-chip ag-chip-new" onclick="ekskulToggleLain()" aria-expanded="${ekskulFormLain || !nama.length}"><i class="bi bi-plus-lg"></i> ${nama.length ? 'Kegiatan lain' : 'Pilih kegiatan'}</button></div>`;
+        if (ekskulFormLain || !nama.length) {
+            html += `<div class="ag-newform">
+                <div class="ag-newform-title">${nama.length ? 'Tambah kegiatan' : 'Belum ada kegiatan ekstrakurikuler di kelas ini untuk semester ini. Pilih atau ketik nama kegiatan:'}</div>
+                <div class="ag-chips">${EKSKUL_PRESET.filter(p => !nama.some(n => ekskulSama(n, p))).slice(0, 8).map(p => `<button type="button" class="ag-chip" onclick="ekskulTambahKegiatan(this.dataset.k)" data-k="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join('')}</div>
+                <label class="ag-grow">Nama kegiatan lain<input type="text" id="ekskul-nama-baru" list="list-ekskul-preset" placeholder="Contoh: Pramuka" onkeydown="if(event.key==='Enter'){event.preventDefault();ekskulTambahKegiatan(this.value);}"></label>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="ekskulTambahKegiatan(document.getElementById('ekskul-nama-baru').value)">Tambah</button>
+                ${nama.length ? '<button type="button" class="ag-btn" onclick="ekskulToggleLain()">Batal</button>' : ''}
+            </div>`;
+        }
+        if (kg) {
+            const predOf = sid => { const r = recs.find(e => String(e.StudentID) === String(sid) && ekskulSama(e.NamaEkskul, kg)); return r ? r : null; };
+            const hit = { ikut: 0, 'Sangat Baik': 0, Baik: 0, Cukup: 0, Kurang: 0 };
+            stds.forEach(s => { const r = predOf(s.StudentID); if (r) { hit.ikut++; if (hit[r.Predikat] !== undefined) hit[r.Predikat]++; } });
+            html += `<div class="ag-sum5">
+                <div class="ag-sumbox"><b>${hit.ikut} / ${stds.length}</b><span>Siswa ikut</span></div>
+                ${EKSKUL_PRED.map(p => `<div class="ag-sumbox ${p.cls}"><b>${hit[p.k]}</b><span>${p.k}</span></div>`).join('')}
+            </div>
+            <div class="ag-toolbar">
+                <label class="ag-search"><i class="bi bi-search"></i><span class="visually-hidden">Cari nama siswa</span>
+                    <input type="search" placeholder="Cari nama siswa" value="${escapeHtml(ekskulCari)}" oninput="ekskulCari=this.value; agSaringNama('ekskul-list', this.value)"></label>
+                <button type="button" class="ag-btn ag-btn-outline-info" onclick="ekskulSemuaIkut()" title="Siswa yang belum ikut ditandai ikut dengan predikat Baik"><i class="bi bi-people"></i> Semua siswa ikut: Baik</button>
+                <span class="ag-saved"><i class="bi bi-check2-circle"></i> Tersimpan otomatis</span>
+            </div>
+            <div class="ag-list" role="list" id="ekskul-list">`;
+            const q = ekskulCari.trim().toLowerCase();
+            stds.forEach((s, i) => {
+                const r = predOf(s.StudentID), v = r ? r.Predikat : '-', sid = escapeHtml(s.StudentID);
+                const tampil = !q || String(s.StudentName).toLowerCase().includes(q);
+                html += `<div class="ag-row ag-row-col${r ? '' : ' ag-row-off'}" role="listitem" data-nama="${escapeHtml(String(s.StudentName).toLowerCase())}"${tampil ? '' : ' hidden'}>
+                    <div class="ag-row-main">
+                        <span class="ag-no">${i + 1}</span>
+                        <span class="ag-name">${escapeHtml(s.StudentName)}</span>
+                        <div class="ag-seg ag-seg5" role="group" aria-label="Predikat ${escapeHtml(s.StudentName)}">
+                            <button type="button" class="ag-st ag-st-off${v === '-' ? ' on' : ''}" aria-pressed="${v === '-'}" data-ek-btn="${sid}--" onclick="ekskulSetPred('${sid}','-')"><span class="ag-st-full">Tidak ikut</span><span class="ag-st-short">Tidak</span></button>
+                            ${EKSKUL_PRED.map(p => `<button type="button" class="ag-st ${p.cls}${v === p.k ? ' on' : ''}" aria-pressed="${v === p.k}" aria-label="${p.k}" data-ek-btn="${sid}-${p.s}" onclick="ekskulSetPred('${sid}','${p.k}')"><span class="ag-st-full">${p.k}</span><span class="ag-st-short">${p.s}</span></button>`).join('')}
+                        </div>
+                    </div>`;
+                if (r) {
+                    html += ekskulCatatanBuka[s.StudentID]
+                        ? `<div class="ag-note"><textarea rows="2" aria-label="Keterangan ${escapeHtml(s.StudentName)}" onchange="ekskulSetCatatan('${sid}', this.value)">${escapeHtml(r.Keterangan || '')}</textarea>
+                            <button type="button" class="ag-linkbtn" onclick="ekskulCatatanBuka['${sid}']=false; renderEkskulInput()">Selesai</button></div>`
+                        : `<div class="ag-note"><span>${escapeHtml(r.Keterangan || 'Belum ada keterangan.')}</span>
+                            <button type="button" class="ag-linkbtn" onclick="ekskulCatatanBuka['${sid}']=true; renderEkskulInput()">Ubah keterangan</button></div>`;
+                }
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        box.innerHTML = html + '</div></div>';
+    }
+    function agSaringNama(listId, q) {
+        q = String(q || '').trim().toLowerCase();
+        document.querySelectorAll('#' + listId + ' [data-nama]').forEach(r => { r.hidden = !!q && !r.dataset.nama.includes(q); });
+    }
+    function ekskulPilihKegiatan(n) { ekskulKegiatan = n; ekskulFormLain = false; ekskulCatatanBuka = {}; renderEkskulInput(); }
+    function ekskulToggleLain() { ekskulFormLain = !ekskulFormLain; renderEkskulInput(); if (ekskulFormLain) document.getElementById('ekskul-nama-baru')?.focus(); }
+    function ekskulTambahKegiatan(n) {
+        n = String(n || '').trim(); if (!n) return Swal.fire('Nama kegiatan kosong', 'Ketik atau pilih nama kegiatan ekstrakurikuler.', 'warning');
+        if (!ekskulTambahan.some(x => ekskulSama(x, n))) ekskulTambahan.push(n);
+        ekskulKegiatan = n; ekskulFormLain = false; renderEkskulInput();
+    }
+    function ekskulSetPred(sid, pred) {
+        const ctx = ekskulCtx(), kg = ekskulKegiatan; if (!ctx.cid || !kg) return;
+        const fokus = document.activeElement?.dataset?.ekBtn;
+        const recs = ekskulRec(ctx).filter(e => String(e.StudentID) === String(sid) && ekskulSama(e.NamaEkskul, kg));
+        if (pred === '-') {
+            const ids = new Set(recs.map(e => e.EkskulID));
+            db.ekskul = db.ekskul.filter(e => !ids.has(e.EkskulID));
+            delete ekskulCatatanBuka[sid];
+        } else if (recs.length) {
+            const r = recs[0];
+            const auto = !r.Keterangan || EKSKUL_PRED.some(p => r.Keterangan === ekskulNarasi(p.k, r.NamaEkskul));
+            r.Predikat = pred; if (auto) r.Keterangan = ekskulNarasi(pred, r.NamaEkskul);
+            r.TahunPelajaran = r.TahunPelajaran || ctx.tapel;
         } else {
-            const newRecord = {
-                EkskulID: 'eks_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-                ClassID: cid,
-                StudentID: sid,
-                StudentName: studentName,
-                Semester: semester,
-                TahunPelajaran: tapel,
-                NamaEkskul: nama,
-                Predikat: predikat,
-                Keterangan: keterangan
-            };
-            db.ekskul.push(newRecord);
-            document.getElementById('ekskul-nama').value = '';
-            document.getElementById('ekskul-keterangan').value = '';
-            Swal.fire('Berhasil!', 'Nilai ekstrakurikuler berhasil disimpan & terhubung ke Rapor.', 'success');
+            const s = db.students.find(x => String(x.StudentID) === String(sid));
+            db.ekskul.push({
+                EkskulID: 'eks_' + Date.now() + '_' + Math.floor(Math.random() * 1000), ClassID: ctx.cid, StudentID: sid, StudentName: s ? s.StudentName : '-',
+                Semester: ctx.sem, TahunPelajaran: ctx.tapel, NamaEkskul: kg, Predikat: pred, Keterangan: ekskulNarasi(pred, kg)
+            });
         }
-
-        syncDB();
-        renderEkskulHistory();
-        if (document.getElementById('view-rapor')?.classList.contains('active')) {
-            previewRaporSiswa();
-        }
+        syncDB(); renderEkskulInput();
+        const kode = pred === '-' ? '-' : (EKSKUL_PRED.find(p => p.k === pred) || {}).s;
+        if (fokus) document.querySelector(`[data-ek-btn="${CSS.escape(sid + '-' + kode)}"]`)?.focus({ preventScroll: true });
+    }
+    function ekskulSetCatatan(sid, teks) {
+        const ctx = ekskulCtx();
+        const r = ekskulRec(ctx).find(e => String(e.StudentID) === String(sid) && ekskulSama(e.NamaEkskul, ekskulKegiatan)); if (!r) return;
+        r.Keterangan = String(teks).trim(); syncDB();
+    }
+    function ekskulSemuaIkut() {
+        const ctx = ekskulCtx(), kg = ekskulKegiatan; if (!ctx.cid || !kg) return;
+        const sudah = new Set(ekskulRec(ctx).filter(e => ekskulSama(e.NamaEkskul, kg)).map(e => String(e.StudentID)));
+        const baru = absenSiswa(ctx.cid).filter(s => !sudah.has(String(s.StudentID)));
+        if (!baru.length) return Swal.fire({ icon: 'info', title: 'Semua siswa sudah ikut', timer: 1500, showConfirmButton: false });
+        baru.forEach((s, i) => db.ekskul.push({
+            EkskulID: 'eks_' + Date.now() + '_' + i, ClassID: ctx.cid, StudentID: s.StudentID, StudentName: s.StudentName,
+            Semester: ctx.sem, TahunPelajaran: ctx.tapel, NamaEkskul: kg, Predikat: 'Baik', Keterangan: ekskulNarasi('Baik', kg)
+        }));
+        syncDB(); renderEkskulInput();
+        Swal.fire({ icon: 'success', title: `${baru.length} siswa ditandai ikut (Baik)`, text: 'Ubah predikat siswa yang berbeda dengan mengetuk tombolnya.', timer: 2200, showConfirmButton: false });
     }
 
     function renderEkskulHistory() {
@@ -6044,22 +7087,14 @@ window.AGENDA_GURU_LOADED = true;
         if (!tbody) return;
         const filterClass = document.getElementById('ekskul-riwayat-kelas')?.value;
         const filterSem = document.getElementById('ekskul-riwayat-semester')?.value;
-
         if (!db.ekskul) db.ekskul = [];
-
         let filtered = db.ekskul;
-        if (filterClass && filterClass !== 'All') {
-            filtered = filtered.filter(e => String(e.ClassID) === String(filterClass));
-        }
-        if (filterSem) {
-            filtered = filtered.filter(e => String(e.Semester) === String(filterSem));
-        }
-
+        if (filterClass && filterClass !== 'All') filtered = filtered.filter(e => String(e.ClassID) === String(filterClass));
+        if (filterSem) filtered = filtered.filter(e => String(e.Semester) === String(filterSem));
         if (filtered.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="bi bi-info-circle me-1"></i>Belum ada data nilai ekstrakurikuler tercatat.</td></tr>';
             return;
         }
-
         let html = '';
         filtered.forEach((e, idx) => {
             const className = db.classes.find(c => String(c.ClassID) === String(e.ClassID))?.ClassName || '-';
@@ -6067,7 +7102,6 @@ window.AGENDA_GURU_LOADED = true;
             if (e.Predikat === 'Sangat Baik') badgeClass = 'bg-success';
             else if (e.Predikat === 'Cukup') badgeClass = 'bg-warning text-dark';
             else if (e.Predikat === 'Kurang') badgeClass = 'bg-danger';
-
             html += `<tr>
                 <td class="text-center fw-bold">${idx + 1}</td>
                 <td class="fw-bold" style="color: var(--navy-deep);">${escapeHtml(e.StudentName)}</td>
@@ -6076,124 +7110,206 @@ window.AGENDA_GURU_LOADED = true;
                 <td class="text-center"><span class="badge ${badgeClass} px-2 py-1">${escapeHtml(e.Predikat)}</span></td>
                 <td class="small text-muted">${escapeHtml(e.Keterangan || '-')}</td>
                 <td class="text-center text-nowrap">
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editEkskul('${e.EkskulID}')" title="Edit"><i class="bi bi-pencil-square"></i></button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEkskul('${e.EkskulID}')" title="Hapus"><i class="bi bi-trash"></i></button>
+                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editEkskul('${e.EkskulID}')" title="Buka di Input per Kegiatan" aria-label="Ubah"><i class="bi bi-pencil-square"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEkskul('${e.EkskulID}')" title="Hapus" aria-label="Hapus"><i class="bi bi-trash"></i></button>
                 </td>
             </tr>`;
         });
         tbody.innerHTML = html;
     }
-
+    // Ubah dari riwayat: buka kegiatan & kelas yang sama di tampilan input
     function editEkskul(id) {
-        if (!db.ekskul) return;
-        const item = db.ekskul.find(e => String(e.EkskulID) === String(id));
-        if (!item) return;
-
-        switchEkskulTab('input');
-        document.getElementById('ekskul-edit-id').value = item.EkskulID;
+        const item = (db.ekskul || []).find(e => String(e.EkskulID) === String(id)); if (!item) return;
         document.getElementById('ekskul-kelas').value = item.ClassID;
-        onEkskulClassChange();
-        setTimeout(() => {
-            if (document.getElementById('ekskul-siswa')) document.getElementById('ekskul-siswa').value = item.StudentID;
-        }, 50);
-        document.getElementById('ekskul-semester').value = item.Semester || 'genap';
-        document.getElementById('ekskul-tapel').value = item.TahunPelajaran || getActiveTapel();
-        document.getElementById('ekskul-nama').value = item.NamaEkskul || '';
-        document.getElementById('ekskul-predikat').value = item.Predikat || 'Baik';
-        document.getElementById('ekskul-keterangan').value = item.Keterangan || '';
-
-        document.getElementById('ekskul-form-title').innerHTML = '<i class="bi bi-pencil-square text-warning"></i> Edit Nilai Ekstrakurikuler Siswa';
-        document.getElementById('btn-cancel-edit-ekskul').style.display = 'inline-block';
+        const sem = document.getElementById('ekskul-semester'); sem.value = String(item.Semester || 'ganjil').toLowerCase(); sem.dataset.userSet = '1';
+        ekskulKegiatan = item.NamaEkskul; ekskulCatatanBuka = {}; ekskulCari = '';
+        if (item.TahunPelajaran && String(item.TahunPelajaran).trim() !== getActiveTapel()) {
+            Swal.fire('Beda Tahun Pelajaran', `Data ini milik TP ${item.TahunPelajaran}. Ganti TP di bagian atas untuk mengubahnya.`, 'info'); return;
+        }
+        switchEkskulTab('input');
+        document.querySelector(`#ekskul-list [data-ek-btn^="${CSS.escape(String(item.StudentID))}-"]`)?.scrollIntoView({ block: 'center' });
     }
-
-    function cancelEditEkskul() {
-        document.getElementById('ekskul-edit-id').value = '';
-        document.getElementById('ekskul-nama').value = '';
-        document.getElementById('ekskul-keterangan').value = '';
-        document.getElementById('ekskul-form-title').innerHTML = '<i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Nilai Ekstrakurikuler Siswa';
-        document.getElementById('btn-cancel-edit-ekskul').style.display = 'none';
-    }
-
     function deleteEkskul(id) {
-        Swal.fire({
-            title: 'Hapus Nilai Ekskul?',
-            text: 'Data nilai ekstrakurikuler ini akan dihapus permanen.',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#d33',
-            confirmButtonText: 'Ya, Hapus'
-        }).then(res => {
-            if (res.isConfirmed) {
+        Swal.fire({ title: 'Hapus Nilai Ekskul?', text: 'Data nilai ekstrakurikuler ini akan dihapus permanen.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Ya, Hapus', cancelButtonText: 'Batal' })
+            .then(res => {
+                if (!res.isConfirmed) return;
                 db.ekskul = (db.ekskul || []).filter(e => String(e.EkskulID) !== String(id));
-                syncDB();
-                renderEkskulHistory();
-                if (document.getElementById('view-rapor')?.classList.contains('active')) {
-                    previewRaporSiswa();
-                }
+                syncDB(); renderEkskulHistory();
                 Swal.fire('Terhapus!', 'Data nilai ekskul telah dihapus.', 'success');
-            }
-        });
+            });
     }
 
     // --- Kokurikuler (Pemisahan Tab Input Nilai & Riwayat Nilai) ---
+    // =====================================================================
+    // NILAI KOKURIKULER — ① data projek, ② predikat tiap siswa (tersimpan otomatis).
+    // Struktur data TIDAK berubah: db.koku { RecordID, ClassID, Tanggal, Jenis, Projek, Deskripsi,
+    // Dimensi: JSON[nama dimensi], KokuData: JSON{ StudentID: { Kategori, Narasi } } }.
+    // =====================================================================
+    const KOKU_DIMENSI = ['Keimanan & Ketakwaan', 'Kewargaan', 'Penalaran Kritis', 'Kreativitas', 'Kolaborasi', 'Kemandirian', 'Kesehatan', 'Komunikasi'];
+    const KOKU_PRED = [{ k: 'Sangat Baik', s: 'SB', cls: 'st-H' }, { k: 'Baik', s: 'B', cls: 'st-S' }, { k: 'Cukup', s: 'C', cls: 'st-I' }, { k: 'Kurang', s: 'K', cls: 'st-A' }];
+    let kokuPilih = null;          // RecordID projek yang sedang dinilai, atau 'baru'
+    let kokuDraft = null;          // isian projek baru yang belum disimpan
+
     function switchKokuTab(tab) {
-        const inputView = document.getElementById('koku-subview-input');
-        const riwayatView = document.getElementById('koku-subview-riwayat');
-        const btnInput = document.getElementById('btn-tab-koku-input');
-        const btnRiwayat = document.getElementById('btn-tab-koku-riwayat');
-
-        if (!inputView || !riwayatView || !btnInput || !btnRiwayat) return;
-
-        if (tab === 'riwayat') {
-            inputView.style.display = 'none';
-            riwayatView.style.display = 'block';
-
-            btnInput.className = 'btn btn-outline-primary';
-            btnRiwayat.className = 'btn btn-primary';
-
-            // Sinkronkan pilihan kelas
-            const currentCid = document.getElementById('koku-kelas').value;
-            const riwayatSelect = document.getElementById('koku-riwayat-kelas');
-            if (riwayatSelect && currentCid) {
-                riwayatSelect.value = currentCid;
-            }
+        const r = tab === 'riwayat';
+        document.getElementById('koku-subview-input').style.display = r ? 'none' : '';
+        document.getElementById('koku-subview-riwayat').style.display = r ? 'block' : 'none';
+        document.getElementById('btn-tab-koku-input').classList.toggle('active', !r);
+        document.getElementById('btn-tab-koku-riwayat').classList.toggle('active', r);
+        if (r) {
+            const rs = document.getElementById('koku-riwayat-kelas'), cid = document.getElementById('koku-kelas').value;
+            if (rs && cid) rs.value = cid;
             loadKokuHistory();
-        } else {
-            // Default: 'input'
-            inputView.style.display = 'block';
-            riwayatView.style.display = 'none';
-
-            btnInput.className = 'btn btn-primary';
-            btnRiwayat.className = 'btn btn-outline-primary';
-        }
+        } else renderKokuInput();
     }
-
     function onKokuClassChange() {
-        const val = document.getElementById('koku-kelas').value;
-        const riwayatSelect = document.getElementById('koku-riwayat-kelas');
-        if (riwayatSelect) riwayatSelect.value = val;
-        // Sembunyikan hasil tabel penilaian sebelumnya saat ganti kelas
-        const resSec = document.getElementById('koku-result-section');
-        if (resSec) resSec.style.display = 'none';
-        loadKokuHistory();
+        const val = document.getElementById('koku-kelas').value, rs = document.getElementById('koku-riwayat-kelas');
+        if (rs) rs.value = val;
+        kokuPilih = null; kokuDraft = null;
+        renderKokuInput(); loadKokuHistory();
     }
-
     function onKokuRiwayatClassChange() {
-        const val = document.getElementById('koku-riwayat-kelas').value;
-        const inputSelect = document.getElementById('koku-kelas');
-        if (inputSelect) inputSelect.value = val;
+        const val = document.getElementById('koku-riwayat-kelas').value, inp = document.getElementById('koku-kelas');
+        if (inp) inp.value = val;
+        kokuPilih = null; kokuDraft = null;
         loadKokuHistory();
     }
+    function renderKokuDimensi() { renderKokuInput(); }   // nama lama, dipanggil saat membuka menu
 
-    function renderKokuDimensi() {
-        let html = '';
-        ['Keimanan & Ketakwaan', 'Kewargaan', 'Penalaran Kritis', 'Kreativitas', 'Kolaborasi', 'Kemandirian', 'Kesehatan', 'Komunikasi'].forEach((d, i) => {
-            html += `<div class="col-md-3 col-6"><div class="form-check"><input class="form-check-input dim-checkbox" type="checkbox" value="${d}" id="dim-chk-${i}"><label class="form-check-label" style="font-size:0.85rem" for="dim-chk-${i}">${d}</label></div></div>`;
+    // Projek kelas ini di TP aktif (projek tanpa tanggal ikut ditampilkan), terbaru dulu
+    function kokuProjekKelas(cid) {
+        const tp = getActiveTapel();
+        return (db.koku || []).filter(k => String(k.ClassID) === String(cid) && (!k.Tanggal || inferTapelFromDates([k.Tanggal]) === tp))
+            .slice().sort((a, b) => String(b.Tanggal || '').localeCompare(String(a.Tanggal || '')));
+    }
+    function kokuDims(rec) { try { const d = JSON.parse(rec.Dimensi || '[]'); return Array.isArray(d) ? d : []; } catch (e) { return []; } }
+    function kokuData(rec) { try { return JSON.parse(rec.KokuData || '{}') || {}; } catch (e) { return {}; } }
+    // Narasi sama seperti versi sebelumnya (disimpan dengan <strong>, rapor membuang tag-nya)
+    function kokuNarasi(nama, rec, cat) {
+        const dims = kokuDims(rec);
+        const dimStr = dims.length > 1 ? dims.slice(0, -1).join(', ') + ' dan ' + dims.slice(-1) : (dims[0] || 'pelajar');
+        const saran = cat === 'Sangat Baik' ? 'Terus pertahankan inisiatif dan kepemimpinan ini.' : cat === 'Baik' ? 'Kembangkan terus potensi dan keaktifan ini.' : cat === 'Cukup' ? 'Perlu ditingkatkan fokus dan konsistensi belajarnya.' : 'Sangat disarankan lebih aktif bertanya dan berkolaborasi.';
+        return `Ananda <strong>${escapeHtml(nama)}</strong> menunjukkan profil <strong>${escapeHtml(dimStr)}</strong> yang <strong>${cat.toLowerCase()}</strong> dalam kegiatan ${escapeHtml(rec.Projek || '')}.${rec.Deskripsi ? ' ' + escapeHtml(rec.Deskripsi) : ''} ${saran}`;
+    }
+
+    function renderKokuInput() {
+        const box = document.getElementById('koku-subview-input'); if (!box) return;
+        const cid = document.getElementById('koku-kelas')?.value;
+        if (!cid) { box.innerHTML = '<div class="card-custom"><div class="card-body"><div class="alert alert-secondary text-center mb-0">Pilih kelas terlebih dahulu.</div></div></div>'; return; }
+        const stds = absenSiswa(cid);
+        if (!stds.length) { box.innerHTML = '<div class="card-custom"><div class="card-body"><div class="alert alert-secondary text-center mb-0">Belum ada siswa di kelas ini. Tambahkan siswa di menu Manajemen Kelas.</div></div></div>'; return; }
+        const projs = kokuProjekKelas(cid);
+        if (kokuPilih !== 'baru' && !projs.some(p => p.RecordID === kokuPilih)) kokuPilih = projs.length ? projs[0].RecordID : 'baru';
+        if (kokuPilih === 'baru' && !kokuDraft) kokuDraft = { Projek: '', Tanggal: agTglHariIni(), Jenis: 'LintasMapel', Deskripsi: '', dims: [] };
+        const rec = kokuPilih === 'baru' ? null : projs.find(p => p.RecordID === kokuPilih);
+
+        let html = `<div class="card-custom"><div class="card-body ag-panel">
+            <div class="ag-steptitle">Projek tahun pelajaran ini</div><div class="ag-pgrid">`;
+        projs.forEach(p => {
+            const n = Object.values(kokuData(p)).filter(v => v && v.Kategori).length, on = p.RecordID === kokuPilih;
+            html += `<button type="button" class="ag-pcard${on ? ' on' : ''}" aria-pressed="${on}" onclick="kokuPilihProjek('${escapeHtml(p.RecordID)}')">
+                <small>${escapeHtml(p.Tanggal ? agTglPendek(p.Tanggal) : 'Tanpa tanggal')} · ${p.Jenis === '7KAIH' ? '7KAIH' : 'Lintas Mapel'}</small>
+                <b>${escapeHtml(p.Projek || 'Tanpa nama')}</b>
+                <span class="${n >= stds.length ? 't-H' : 't-I'}">${n >= stds.length ? 'Lengkap ' : 'Dinilai '}${n}/${stds.length} siswa</span></button>`;
         });
-        document.getElementById('koku-dimensi-container').innerHTML = html;
-        if (!document.getElementById('koku-tanggal').value) {
-            document.getElementById('koku-tanggal').value = tanggalHariIni();
+        html += `<button type="button" class="ag-pcard ag-pcard-new${kokuPilih === 'baru' ? ' on' : ''}" onclick="kokuPilihProjek('baru')"><i class="bi bi-plus-lg"></i> Projek baru</button></div></div></div>`;
+
+        // ① Data projek
+        const d = rec ? { Projek: rec.Projek || '', Tanggal: rec.Tanggal || '', Jenis: rec.Jenis || 'LintasMapel', Deskripsi: rec.Deskripsi || '', dims: kokuDims(rec) } : kokuDraft;
+        html += `<div class="card-custom"><div class="card-body ag-panel">
+            <div class="ag-stephead"><span class="ag-stepnum">1</span><h5>Data projek</h5>${rec ? '<span class="ag-saved"><i class="bi bi-check2-circle"></i> Tersimpan</span>' : ''}</div>
+            <div class="ag-formgrid">
+                <label class="ag-field ag-span2">Nama projek<input type="text" class="form-control" id="koku-projek" value="${escapeHtml(d.Projek)}" placeholder="Contoh: Daur Ulang Sampah" onchange="kokuUbahField('Projek', this.value)"></label>
+                <label class="ag-field">Tanggal<input type="date" class="form-control" id="koku-tanggal" value="${escapeHtml(d.Tanggal)}" onchange="kokuUbahField('Tanggal', this.value)"></label>
+                <label class="ag-field">Jenis<select class="form-select" id="koku-jenis" onchange="kokuUbahField('Jenis', this.value)">
+                    <option value="LintasMapel"${d.Jenis !== '7KAIH' ? ' selected' : ''}>Lintas Mata Pelajaran</option><option value="7KAIH"${d.Jenis === '7KAIH' ? ' selected' : ''}>7KAIH</option></select></label>
+            </div>
+            <label class="ag-field">Deskripsi singkat (opsional, ikut masuk ke deskripsi rapor)<input type="text" class="form-control" id="koku-deskripsi" value="${escapeHtml(d.Deskripsi)}" placeholder="Contoh: Siswa memilah sampah kelas dan membuat kerajinan dari bahan bekas." onchange="kokuUbahField('Deskripsi', this.value)"></label>
+            <div class="ag-field">Dimensi profil yang dinilai</div>
+            <div class="ag-chips" role="group" aria-label="Dimensi profil">${KOKU_DIMENSI.map(nm => {
+                const on = d.dims.includes(nm);
+                return `<button type="button" class="ag-chip ag-chip-dim${on ? ' on' : ''}" aria-pressed="${on}" onclick="kokuToggleDimensi(this.dataset.d)" data-d="${escapeHtml(nm)}">${on ? '<i class="bi bi-check-lg"></i> ' : ''}${escapeHtml(nm)}</button>`;
+            }).join('')}</div>
+            ${rec ? `<div><button type="button" class="ag-btn ag-btn-danger-outline" onclick="deleteKokuRecord('${escapeHtml(rec.RecordID)}')"><i class="bi bi-trash"></i> Hapus projek</button></div>`
+                  : `<div><button type="button" class="ag-btn ag-btn-primary" onclick="kokuSimpanProjekBaru()"><i class="bi bi-arrow-right-circle"></i> Simpan projek &amp; mulai menilai</button></div>`}
+        </div></div>`;
+
+        // ② Penilaian siswa
+        if (rec) {
+            const data = kokuData(rec), n = stds.filter(s => data[s.StudentID] && data[s.StudentID].Kategori).length;
+            html += `<div class="card-custom"><div class="card-body ag-panel">
+                <div class="ag-stephead"><span class="ag-stepnum">2</span><h5>Penilaian siswa <small>· Dinilai ${n}/${stds.length}</small></h5>
+                    <button type="button" class="ag-btn ag-btn-outline-info" onclick="kokuIsiKosong()"><i class="bi bi-magic"></i> Isi yang kosong: Baik</button>
+                    <span class="ag-saved"><i class="bi bi-check2-circle"></i> Tersimpan otomatis</span></div>
+                <p class="ag-hint mb-0">Ketuk predikat sekali lagi untuk membatalkannya.</p>
+                <div class="ag-list" role="list" id="koku-list">`;
+            stds.forEach((s, i) => {
+                const v = data[s.StudentID] && data[s.StudentID].Kategori || '', sid = escapeHtml(s.StudentID);
+                html += `<div class="ag-row ag-row-col" role="listitem">
+                    <div class="ag-row-main"><span class="ag-no">${i + 1}</span><span class="ag-name">${escapeHtml(s.StudentName)}</span>
+                    <div class="ag-seg" role="group" aria-label="Predikat ${escapeHtml(s.StudentName)}">${KOKU_PRED.map(p => `<button type="button" class="ag-st ag-st-wide ${p.cls}${v === p.k ? ' on' : ''}" aria-pressed="${v === p.k}" aria-label="${p.k}" data-koku-btn="${sid}-${p.s}" onclick="kokuSetPred('${sid}','${p.k}')"><span class="ag-st-full">${p.k}</span><span class="ag-st-short">${p.s}</span></button>`).join('')}</div></div>
+                    <div class="ag-note${v ? '' : ' ag-note-muted'}"><span>${v ? String(data[s.StudentID].Narasi || '').replace(/<(?!\/?strong>)[^>]*>/g, '') : 'Belum dinilai. Ketuk salah satu predikat.'}</span></div>
+                </div>`;
+            });
+            html += '</div></div></div>';
         }
+        box.innerHTML = html;
+    }
+    function kokuPilihProjek(id) { kokuPilih = id; if (id === 'baru') kokuDraft = null; renderKokuInput(); if (id === 'baru') document.getElementById('koku-projek')?.focus(); }
+    function kokuRecAktif() { return kokuPilih && kokuPilih !== 'baru' ? (db.koku || []).find(k => k.RecordID === kokuPilih) : null; }
+    // Ubah data projek: projek tersimpan langsung diperbarui (narasi siswa ikut disusun ulang)
+    function kokuUbahField(f, v) {
+        const rec = kokuRecAktif();
+        if (!rec) { if (kokuDraft) kokuDraft[f] = v; return; }
+        if (f === 'Projek' && !String(v).trim()) { Swal.fire('Nama projek kosong', 'Nama projek wajib diisi.', 'warning'); return renderKokuInput(); }
+        rec[f] = f === 'Projek' || f === 'Deskripsi' ? String(v).trim() : v;
+        kokuSusunUlangNarasi(rec); syncDB(); renderKokuInput(); loadKokuHistory();
+    }
+    function kokuToggleDimensi(nm) {
+        const rec = kokuRecAktif();
+        if (!rec) { if (kokuDraft) { kokuDraft.dims = kokuDraft.dims.includes(nm) ? kokuDraft.dims.filter(x => x !== nm) : KOKU_DIMENSI.filter(x => x === nm || kokuDraft.dims.includes(x)); } return renderKokuInput(); }
+        let dims = kokuDims(rec);
+        if (dims.includes(nm)) { if (dims.length === 1) return Swal.fire('Minimal satu dimensi', 'Projek harus menilai minimal satu dimensi profil.', 'info'); dims = dims.filter(x => x !== nm); }
+        else dims = KOKU_DIMENSI.filter(x => x === nm || dims.includes(x));
+        rec.Dimensi = JSON.stringify(dims); kokuSusunUlangNarasi(rec); syncDB(); renderKokuInput();
+    }
+    function kokuSusunUlangNarasi(rec) {
+        const data = kokuData(rec);
+        Object.keys(data).forEach(sid => {
+            if (!data[sid] || !data[sid].Kategori) return;
+            const s = db.students.find(x => String(x.StudentID) === String(sid));
+            data[sid].Narasi = kokuNarasi(s ? s.StudentName : '', rec, data[sid].Kategori);
+        });
+        rec.KokuData = JSON.stringify(data);
+    }
+    function kokuSimpanProjekBaru() {
+        const cid = document.getElementById('koku-kelas').value, d = kokuDraft;
+        ['Projek', 'Tanggal', 'Deskripsi'].forEach(f => { const el = document.getElementById('koku-' + f.toLowerCase()); if (el) d[f] = el.value; });
+        d.Jenis = document.getElementById('koku-jenis')?.value || d.Jenis;
+        if (!String(d.Projek).trim()) return Swal.fire('Nama projek belum diisi', 'Isi nama projek terlebih dahulu.', 'warning');
+        if (!d.dims.length) return Swal.fire('Dimensi belum dipilih', 'Pilih minimal satu dimensi profil yang dinilai.', 'warning');
+        const rec = { RecordID: 'K' + Date.now(), ClassID: cid, Tanggal: d.Tanggal, Jenis: d.Jenis, Projek: String(d.Projek).trim(), Deskripsi: String(d.Deskripsi || '').trim(), Dimensi: JSON.stringify(d.dims), KokuData: '{}' };
+        if (!db.koku) db.koku = [];
+        db.koku.push(rec); kokuPilih = rec.RecordID; kokuDraft = null;
+        syncDB(); renderKokuInput(); loadKokuHistory();
+        document.getElementById('koku-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    function kokuSetPred(sid, cat) {
+        const rec = kokuRecAktif(); if (!rec) return;
+        const fokus = document.activeElement?.dataset?.kokuBtn;
+        const data = kokuData(rec), s = db.students.find(x => String(x.StudentID) === String(sid));
+        if (data[sid] && data[sid].Kategori === cat) delete data[sid];
+        else data[sid] = { Kategori: cat, Narasi: kokuNarasi(s ? s.StudentName : '', rec, cat) };
+        rec.KokuData = JSON.stringify(data); syncDB(); renderKokuInput();
+        if (fokus) document.querySelector(`[data-koku-btn="${CSS.escape(fokus)}"]`)?.focus({ preventScroll: true });
+    }
+    function kokuIsiKosong() {
+        const rec = kokuRecAktif(); if (!rec) return;
+        const data = kokuData(rec), kosong = absenSiswa(rec.ClassID).filter(s => !(data[s.StudentID] && data[s.StudentID].Kategori));
+        if (!kosong.length) return Swal.fire({ icon: 'info', title: 'Semua siswa sudah dinilai', timer: 1500, showConfirmButton: false });
+        kosong.forEach(s => { data[s.StudentID] = { Kategori: 'Baik', Narasi: kokuNarasi(s.StudentName, rec, 'Baik') }; });
+        rec.KokuData = JSON.stringify(data); syncDB(); renderKokuInput();
+        Swal.fire({ icon: 'success', title: `${kosong.length} siswa diisi Baik`, timer: 1600, showConfirmButton: false });
     }
 
     function loadKokuHistory() {
@@ -6201,231 +7317,55 @@ window.AGENDA_GURU_LOADED = true;
         const tbody = document.getElementById('koku-history-tbody');
         const filterEl = document.getElementById('koku-export-filter');
         if (!tbody) return;
-
         if (!cid) {
             tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted"><i class="bi bi-arrow-up-circle fs-3 d-block mb-1 text-primary"></i>Silakan pilih kelas terlebih dahulu untuk melihat riwayat penilaian.</td></tr>';
             if (filterEl) filterEl.innerHTML = '<option value="">Semua Projek (Kelas Ini)</option>';
             return;
         }
-
-        const records = db.koku.filter(k => String(k.ClassID) === String(cid));
+        const records = (db.koku || []).filter(k => String(k.ClassID) === String(cid));
         if (records.length === 0) {
             tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted"><i class="bi bi-folder-x fs-3 d-block mb-1"></i>Belum ada data penilaian kokurikuler tersimpan untuk kelas ini.</td></tr>';
             if (filterEl) filterEl.innerHTML = '<option value="">Semua Projek (Kelas Ini)</option>';
             return;
         }
-
-        let html = '';
-        let filterOpts = '<option value="">Semua Projek (Kelas Ini)</option>';
+        let html = '', filterOpts = '<option value="">Semua Projek (Kelas Ini)</option>';
         records.forEach(k => {
-            let jumlah = 0;
-            try { jumlah = Object.keys(JSON.parse(k.KokuData || '{}')).length; } catch (e) { }
-            const jenisLabel = k.Jenis === '7KAIH' ? '7KAIH' : 'Lintas Mapel';
-            const tglFormatted = formatTanggalIndo(k.Tanggal);
+            const jumlah = Object.values(kokuData(k)).filter(v => v && v.Kategori).length;
             html += `<tr>
-                <td class="fw-bold">${tglFormatted}</td>
-                <td><span class="badge bg-light text-primary border">${jenisLabel}</span></td>
+                <td class="fw-bold">${formatTanggalIndo(k.Tanggal)}</td>
+                <td><span class="badge bg-light text-primary border">${k.Jenis === '7KAIH' ? '7KAIH' : 'Lintas Mapel'}</span></td>
                 <td class="fw-semibold text-primary">${escapeHtml(k.Projek || '-')}</td>
                 <td class="text-center"><span class="badge bg-success-subtle text-success border border-success-subtle">${jumlah} Siswa</span></td>
                 <td class="text-nowrap text-center">
-                    <button class="btn btn-sm btn-outline-primary me-1 mb-1" onclick="editKokuRecord('${k.RecordID}')" title="Lihat/Edit"><i class="bi bi-pencil-square"></i> Edit</button>
-                    <button class="btn btn-sm btn-outline-danger mb-1" onclick="deleteKokuRecord('${k.RecordID}')" title="Hapus"><i class="bi bi-trash"></i></button>
-                </td>
-            </tr>`;
+                    <button class="btn btn-sm btn-outline-primary me-1 mb-1" onclick="editKokuRecord('${k.RecordID}')" title="Buka untuk dinilai"><i class="bi bi-pencil-square"></i> Buka</button>
+                    <button class="btn btn-sm btn-outline-danger mb-1" onclick="deleteKokuRecord('${k.RecordID}')" title="Hapus" aria-label="Hapus"><i class="bi bi-trash"></i></button>
+                </td></tr>`;
             filterOpts += `<option value="${k.RecordID}">${escapeHtml(k.Projek || '-')} (${k.Tanggal || '-'})</option>`;
         });
         tbody.innerHTML = html;
         if (filterEl) filterEl.innerHTML = filterOpts;
     }
-
-    function generateKokuTable() {
-        const cid = document.getElementById('koku-kelas').value, 
-              p = document.getElementById('koku-projek').value, 
-              desc = document.getElementById('koku-deskripsi').value;
-        let selectedDims = []; 
-        document.querySelectorAll('.dim-checkbox:checked').forEach(chk => selectedDims.push(chk.value));
-
-        if (!cid || !p || !desc || selectedDims.length === 0) {
-            return Swal.fire('Peringatan', 'Harap lengkapi kelas, nama projek, deskripsi, dan pilih minimal 1 dimensi profil!', 'warning');
-        }
-
-        const stds = db.students.filter(s => String(s.ClassID) === String(cid)); 
-        if (stds.length === 0) return Swal.fire('Informasi', 'Tidak ada data siswa pada kelas ini.', 'info');
-
-        editingKokuId = null;
-        window.activeKokuProject = { p, desc, selectedDims }; 
-        let html = '';
-        stds.forEach((s, i) => {
-            html += `<tr data-sid="${s.StudentID}" class="koku-row">
-                <td class="text-center">${i + 1}</td>
-                <td class="fw-bold text-primary">${escapeHtml(s.StudentName)}</td>
-                <td>
-                    <select class="form-select form-select-sm koku-cat-select" onchange="updateKokuNarasi(this)">
-                        <option value="">Pilih Predikat</option>
-                        <option value="Sangat Baik">Sangat Baik</option>
-                        <option value="Baik">Baik</option>
-                        <option value="Cukup">Cukup</option>
-                        <option value="Kurang">Kurang</option>
-                    </select>
-                </td>
-                <td><small class="koku-narasi-text text-muted">Pilih kategori...</small></td>
-            </tr>`;
-        });
-        document.getElementById('koku-tbody').innerHTML = html; 
-        document.getElementById('koku-result-section').style.display = 'block';
-
-        const cancelBtn = document.getElementById('btn-cancel-edit-koku');
-        if (cancelBtn) cancelBtn.style.display = 'inline-block';
-    }
-
-    function updateKokuNarasi(selectElem) {
-        const cat = selectElem.value, row = selectElem.closest('tr'), narasiContainer = row.querySelector('.koku-narasi-text'), sName = row.cells[1].innerText;
-        if (!cat) { narasiContainer.innerHTML = 'Pilih kategori...'; return; }
-        const proj = window.activeKokuProject;
-        let dimStr = proj.selectedDims.length > 1 ? proj.selectedDims.slice(0, -1).join(', ') + ' dan ' + proj.selectedDims.slice(-1) : proj.selectedDims[0];
-        let saran = cat === 'Sangat Baik' ? 'Terus pertahankan inisiatif dan kepemimpinan ini.' : cat === 'Baik' ? 'Kembangkan terus potensi dan keaktifan ini.' : cat === 'Cukup' ? 'Perlu ditingkatkan fokus dan konsistensi belajarnya.' : 'Sangat disarankan lebih aktif bertanya dan berkolaborasi.';
-        narasiContainer.innerHTML = `Ananda <strong>${escapeHtml(sName)}</strong> menunjukkan profil <strong>${dimStr}</strong> yang <strong>${cat.toLowerCase()}</strong> dalam kegiatan ${escapeHtml(proj.p)}. ${escapeHtml(proj.desc)} ${saran}`; 
-        narasiContainer.classList.remove('text-muted');
-    }
-
     function editKokuRecord(id) {
-        const k = db.koku.find(x => x.RecordID === id);
-        if (!k) return;
-
+        const k = (db.koku || []).find(x => x.RecordID === id); if (!k) return;
         document.getElementById('koku-kelas').value = k.ClassID;
-        const riwayatSelect = document.getElementById('koku-riwayat-kelas');
-        if (riwayatSelect) riwayatSelect.value = k.ClassID;
-
-        document.getElementById('koku-tanggal').value = k.Tanggal || '';
-        document.getElementById('koku-jenis').value = k.Jenis || 'LintasMapel';
-        document.getElementById('koku-projek').value = k.Projek || '';
-        document.getElementById('koku-deskripsi').value = k.Deskripsi || '';
-
-        let selectedDims = []; try { selectedDims = JSON.parse(k.Dimensi || '[]'); } catch (e) { }
-        document.querySelectorAll('.dim-checkbox').forEach(chk => { chk.checked = selectedDims.includes(chk.value); });
-
-        let kokuData = {}; try { kokuData = JSON.parse(k.KokuData || '{}'); } catch (e) { }
-
-        const stds = db.students.filter(s => String(s.ClassID) === String(k.ClassID));
-        window.activeKokuProject = { p: k.Projek, desc: k.Deskripsi, selectedDims };
-        let html = '';
-        stds.forEach((s, i) => {
-            const saved = kokuData[s.StudentID];
-            const cat = saved ? saved.Kategori : '';
-            const narasi = saved ? saved.Narasi : 'Pilih kategori...';
-            html += `<tr data-sid="${s.StudentID}" class="koku-row">
-                <td class="text-center">${i + 1}</td>
-                <td class="fw-bold text-primary">${escapeHtml(s.StudentName)}</td>
-                <td>
-                    <select class="form-select form-select-sm koku-cat-select" onchange="updateKokuNarasi(this)">
-                        <option value="">Pilih</option>
-                        <option value="Sangat Baik" ${cat === 'Sangat Baik' ? 'selected' : ''}>Sangat Baik</option>
-                        <option value="Baik" ${cat === 'Baik' ? 'selected' : ''}>Baik</option>
-                        <option value="Cukup" ${cat === 'Cukup' ? 'selected' : ''}>Cukup</option>
-                        <option value="Kurang" ${cat === 'Kurang' ? 'selected' : ''}>Kurang</option>
-                    </select>
-                </td>
-                <td><small class="koku-narasi-text ${cat ? '' : 'text-muted'}">${narasi}</small></td>
-            </tr>`;
-        });
-        document.getElementById('koku-tbody').innerHTML = html;
-        document.getElementById('koku-result-section').style.display = 'block';
-        editingKokuId = id;
-
-        // Pindah ke tab Input Nilai
+        const rs = document.getElementById('koku-riwayat-kelas'); if (rs) rs.value = k.ClassID;
+        if (k.Tanggal && inferTapelFromDates([k.Tanggal]) !== getActiveTapel()) {
+            Swal.fire('Beda Tahun Pelajaran', `Projek ini bertanggal ${formatTanggalIndo(k.Tanggal)} (TP ${inferTapelFromDates([k.Tanggal])}). Ganti TP di bagian atas untuk membukanya.`, 'info'); return;
+        }
+        kokuPilih = id; kokuDraft = null;
         switchKokuTab('input');
-
-        const titleElem = document.getElementById('koku-form-title');
-        if (titleElem) {
-            titleElem.innerHTML = '<i class="bi bi-pencil-square text-warning"></i> Edit Penilaian Kokurikuler: ' + escapeHtml(k.Projek);
-        }
-        const cancelBtn = document.getElementById('btn-cancel-edit-koku');
-        if (cancelBtn) cancelBtn.style.display = 'inline-block';
-
         window.scrollTo({ top: 0, behavior: 'smooth' });
-        Swal.fire({ 
-            icon: 'info', 
-            title: 'Mode Edit Kokurikuler', 
-            text: `Data projek "${k.Projek}" dimuat ke formulir. Silakan ubah lalu klik "Simpan Data Penilaian".`, 
-            timer: 2500, 
-            showConfirmButton: false 
-        });
     }
-
-    function cancelEditKoku() {
-        editingKokuId = null;
-        document.getElementById('koku-projek').value = '';
-        document.getElementById('koku-deskripsi').value = '';
-        document.getElementById('koku-result-section').style.display = 'none';
-        document.querySelectorAll('.dim-checkbox').forEach(chk => chk.checked = false);
-        const titleElem = document.getElementById('koku-form-title');
-        if (titleElem) {
-            titleElem.innerHTML = '<i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Penilaian Kokurikuler';
-        }
-        const cancelBtn = document.getElementById('btn-cancel-edit-koku');
-        if (cancelBtn) cancelBtn.style.display = 'none';
-    }
-
+    function cancelEditKoku() { editingKokuId = null; kokuDraft = null; }
     function deleteKokuRecord(id) {
-        Swal.fire({
-            title: 'Hapus Data Kokurikuler?', text: 'Seluruh nilai kokurikuler pada projek ini akan dihapus.', icon: 'warning',
-            showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, Hapus!', cancelButtonText: 'Batal'
-        }).then((result) => {
-            if (result.isConfirmed) {
+        Swal.fire({ title: 'Hapus projek kokurikuler?', text: 'Projek ini beserta seluruh nilai siswanya akan dihapus.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal' })
+            .then(result => {
+                if (!result.isConfirmed) return;
                 db.koku = db.koku.filter(k => k.RecordID !== id);
-                if (editingKokuId === id) cancelEditKoku();
-                syncDB(); loadKokuHistory();
-                Swal.fire('Terhapus!', 'Data kokurikuler berhasil dihapus.', 'success');
-            }
-        });
-    }
-
-    function saveAllKoku() {
-        const cid = document.getElementById('koku-kelas').value;
-        const tanggal = document.getElementById('koku-tanggal').value;
-        const jenis = document.getElementById('koku-jenis').value;
-        const proj = window.activeKokuProject;
-        if (!proj) return Swal.fire('Error', 'Silakan buat format tabel terlebih dahulu.', 'error');
-
-        let kokuData = {}, count = 0;
-        document.querySelectorAll('.koku-row').forEach(row => {
-            const sid = row.getAttribute('data-sid'), cat = row.querySelector('.koku-cat-select').value;
-            if (cat) { kokuData[sid] = { Kategori: cat, Narasi: row.querySelector('.koku-narasi-text').innerHTML }; count++; }
-        });
-        if (count === 0) return Swal.fire('Peringatan', 'Belum ada penilaian siswa yang dipilih!', 'warning');
-
-        const wasEditing = !!editingKokuId;
-        const record = {
-            RecordID: editingKokuId || ("K" + Date.now()),
-            ClassID: cid, Tanggal: tanggal, Jenis: jenis,
-            Projek: proj.p, Deskripsi: proj.desc, Dimensi: JSON.stringify(proj.selectedDims),
-            KokuData: JSON.stringify(kokuData)
-        };
-
-        if (editingKokuId) {
-            const idx = db.koku.findIndex(k => k.RecordID === editingKokuId);
-            if (idx > -1) db.koku[idx] = record; else db.koku.push(record);
-        } else {
-            db.koku.push(record);
-        }
-
-        cancelEditKoku();
-        syncDB(); loadKokuHistory();
-
-        Swal.fire({
-            title: wasEditing ? 'Penilaian Diperbarui' : 'Penilaian Disimpan',
-            text: `${count} Nilai kokurikuler siswa berhasil disimpan ke sistem.`,
-            icon: 'success',
-            showCancelButton: true,
-            confirmButtonText: '<i class="bi bi-clock-history me-1"></i> Lihat Riwayat Nilai',
-            cancelButtonText: '<i class="bi bi-plus-lg me-1"></i> Input Nilai Baru'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                switchKokuTab('riwayat');
-            } else {
-                switchKokuTab('input');
-            }
-        });
+                if (kokuPilih === id) kokuPilih = null;
+                syncDB(); loadKokuHistory(); renderKokuInput();
+                Swal.fire({ icon: 'success', title: 'Terhapus', timer: 1200, showConfirmButton: false });
+            });
     }
 
     function getKokuExportData() {
@@ -6446,35 +7386,99 @@ window.AGENDA_GURU_LOADED = true;
     // Export ke Word (.doc) memakai trik HTML-sebagai-dokumen-Word
 
     // --- Jurnal Harian (Pemisahan Tampilan Input Jurnal & Riwayat Jurnal) ---
+    // =====================================================================
+    // JURNAL HARIAN — pilih tanggal, ketuk pelajaran dari "Jadwal hari ini", tulis, simpan.
+    // Struktur data TIDAK berubah: db.journal { RecordID, Date, ClassID, Subject, Content, AttachmentUrl, AttachmentData }.
+    // =====================================================================
+    let jurnalTanggal = agTglHariIni(), jurnalSlot = null;
     function switchJurnalTab(tab) {
-        const inputView = document.getElementById('jurnal-subview-input');
-        const riwayatView = document.getElementById('jurnal-subview-riwayat');
-        const btnInput = document.getElementById('btn-tab-jurnal-input');
-        const btnRiwayat = document.getElementById('btn-tab-jurnal-riwayat');
-
-        if (!inputView || !riwayatView || !btnInput || !btnRiwayat) return;
-
-        if (tab === 'riwayat') {
-            inputView.style.display = 'none';
-            riwayatView.style.display = 'block';
-
-            btnInput.className = 'btn btn-outline-primary';
-            btnRiwayat.className = 'btn btn-primary';
-
+        const r = tab === 'riwayat';
+        document.getElementById('jurnal-subview-input').style.display = r ? 'none' : '';
+        document.getElementById('jurnal-subview-riwayat').style.display = r ? 'block' : 'none';
+        document.getElementById('btn-tab-jurnal-input').classList.toggle('active', !r);
+        document.getElementById('btn-tab-jurnal-riwayat').classList.toggle('active', r);
+        if (r) {
+            const f = document.getElementById('filter-jurnal-kelas'), k = document.getElementById('jurnal-kelas')?.value;
+            if (f && !f.value && k) f.value = k;
             renderJurnal();
+        } else renderJurnalInput();
+    }
+    function jurnalHariNama(iso) { return ['Minggu', ...AG_HARI][agHariKe(iso)]; }
+    function jurnalAda(tgl, cid, subj) {
+        return db.journal.find(j => j.Date === tgl && String(j.ClassID) === String(cid) && String(j.Subject).trim().toLowerCase() === String(subj).trim().toLowerCase());
+    }
+    function renderJurnalInput() {
+        const box = document.getElementById('jurnal-jadwal-box'); if (!box) return;
+        const tgl = jurnalTanggal, hari = jurnalHariNama(tgl), hariIni = agTglHariIni();
+        document.getElementById('jurnal-date').value = tgl;
+        const slots = db.schedule.filter(s => s.Day === hari).sort((a, b) => String(a.TimeStart).localeCompare(String(b.TimeStart)));
+        let html = `<div class="ag-nav">
+            <button type="button" class="ag-iconbtn" onclick="jurnalGeser(-1)" aria-label="Hari sebelumnya"><i class="bi bi-chevron-left"></i></button>
+            <div class="ag-nav-mid"><div class="ag-nav-title">${escapeHtml(formatTanggalIndo(tgl))}</div>
+                <div class="ag-nav-sub ${tgl === hariIni ? 'ag-tag-today' : tgl > hariIni ? 'ag-tag-warn' : ''}">${tgl === hariIni ? 'Hari ini' : tgl > hariIni ? 'Tanggal mendatang' : '&nbsp;'}</div></div>
+            <button type="button" class="ag-iconbtn" onclick="jurnalGeser(1)" aria-label="Hari berikutnya"><i class="bi bi-chevron-right"></i></button>
+            <div class="ag-nav-tools">
+                ${tgl !== hariIni ? '<button type="button" class="ag-btn" onclick="jurnalKeTanggal(agTglHariIni())">Hari ini</button>' : ''}
+                <label class="ag-btn ag-datepick" title="Pilih tanggal"><i class="bi bi-calendar3"></i><span>Pilih tanggal</span>
+                    <input type="date" value="${tgl}" onchange="jurnalKeTanggal(this.value)" aria-label="Pilih tanggal jurnal"></label>
+            </div></div>
+            <div class="ag-steptitle">Jadwal hari ${hari} · ketuk untuk mengisi</div>`;
+        if (!slots.length) {
+            html += `<p class="ag-hint mb-0">Tidak ada jadwal di hari ${hari}. ${db.schedule.length ? '' : 'Isi menu <b>Jadwal Pelajaran</b> agar pelajaran muncul di sini dan jurnal terisi lebih cepat.'}</p>`;
         } else {
-            // Default: 'input'
-            inputView.style.display = 'block';
-            riwayatView.style.display = 'none';
-
-            btnInput.className = 'btn btn-primary';
-            btnRiwayat.className = 'btn btn-outline-primary';
-
-            const dateInput = document.getElementById('jurnal-date');
-            if (dateInput && !dateInput.value) {
-                dateInput.value = tanggalHariIni();
-            }
+            html += '<div class="ag-slotgrid">';
+            slots.forEach(s => {
+                const done = jurnalAda(tgl, s.ClassID, s.Subject), on = jurnalSlot === s.RecordID;
+                html += `<button type="button" class="ag-slot${on ? ' on' : ''}" aria-pressed="${on}" onclick="jurnalPilihSlot('${escapeHtml(s.RecordID)}')">
+                    <span class="ag-slot-time">${escapeHtml(String(s.TimeStart).replace(':', '.'))}–${escapeHtml(String(s.TimeEnd).replace(':', '.'))}</span>
+                    <span class="ag-slot-main"><b>${escapeHtml(s.Subject)}</b><small>${escapeHtml(jadwalKelasNama(s.ClassID))}</small></span>
+                    <span class="ag-badge ${done ? 'b-tuntas' : 'b-kosong'}">${done ? 'Sudah diisi' : 'Belum'}</span></button>`;
+            });
+            html += '</div>';
         }
+        html += `<button type="button" class="ag-linkbtn align-self-start" onclick="jurnalLuarJadwal()">Isi jurnal di luar jadwal</button>`;
+        box.innerHTML = html;
+        renderJurnalMinggu();
+    }
+    function renderJurnalMinggu() {
+        const box = document.getElementById('jurnal-minggu'); if (!box) return;
+        const tgl = jurnalTanggal, senin = agGeserTgl(tgl, -((agHariKe(tgl) + 6) % 7));
+        let html = '<div class="ag-steptitle mb-1">Minggu ini</div>';
+        for (let i = 0; i < 6; i++) {
+            const d = agGeserTgl(senin, i), isi = db.journal.filter(j => j.Date === d), hari = AG_HARI[i];
+            const target = db.schedule.filter(s => s.Day === hari).length;
+            const st = isi.length ? (target ? `${Math.min(isi.length, target)} dari ${target}` : `${isi.length} jurnal`) : (target ? 'Belum' : '-');
+            html += `<button type="button" class="ag-weekday${d === tgl ? ' on' : ''}" onclick="jurnalKeTanggal('${d}')">
+                <span class="ag-weekday-head"><b>${hari}, ${Number(d.slice(8, 10))} ${AG_NAMA_BULAN[Number(d.slice(5, 7)) - 1].slice(0, 3)}</b>
+                <span class="${isi.length && (!target || isi.length >= target) ? 't-H' : isi.length ? 't-I' : 'text-muted'}">${st}</span></span>
+                ${isi.map(j => `<small>• ${escapeHtml(j.Subject)} ${escapeHtml(jadwalKelasNama(j.ClassID))}</small>`).join('')}</button>`;
+        }
+        box.innerHTML = html;
+    }
+    function jurnalGeser(n) { jurnalKeTanggal(agGeserTgl(jurnalTanggal, n)); }
+    function jurnalKeTanggal(t) { if (!t) return; if (editingJournalId) cancelEditJurnal(); jurnalTanggal = t; jurnalSlot = null; renderJurnalInput(); }
+    function jurnalPilihSlot(id) {
+        const s = db.schedule.find(x => x.RecordID === id); if (!s) return;
+        const ada = jurnalAda(jurnalTanggal, s.ClassID, s.Subject);
+        if (ada) { editJournal(ada.RecordID); jurnalSlot = id; renderJurnalInput(); return; }
+        if (editingJournalId) cancelEditJurnal();
+        jurnalSlot = id;
+        const k = document.getElementById('jurnal-kelas'), m = document.getElementById('jurnal-mapel');
+        if (k) k.value = s.ClassID;
+        if (m) { if (![...m.options].some(o => o.value === s.Subject)) m.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(s.Subject)}">${escapeHtml(s.Subject)}</option>`); m.value = s.Subject; }
+        renderJurnalInput();
+        document.getElementById('jurnal-content')?.focus();
+    }
+    function jurnalLuarJadwal() {
+        if (editingJournalId) cancelEditJurnal();
+        jurnalSlot = null; renderJurnalInput();
+        const m = document.getElementById('jurnal-mapel'); if (m) m.value = '';
+        document.getElementById('jurnal-kelas')?.focus();
+    }
+    function jurnalTambahCepat(teks) {
+        const el = document.getElementById('jurnal-content'); if (!el) return;
+        el.value = (el.value.trim() ? el.value.replace(/[\s,.]*$/, '') + ', ' + teks.toLowerCase() : teks) ;
+        el.focus();
     }
 
     // Helper format tanggal Indonesia
@@ -6757,26 +7761,19 @@ window.AGENDA_GURU_LOADED = true;
         document.getElementById('jurnal-content').value = ''; 
         clearJurnalFile();
 
-        Swal.fire({
-            title: wasEditing ? 'Jurnal Diperbarui' : 'Jurnal Disimpan',
-            text: wasEditing ? 'Perubahan catatan jurnal berhasil disimpan.' : 'Catatan jurnal pembelajaran baru berhasil ditambahkan.',
-            icon: 'success',
-            showCancelButton: true,
-            confirmButtonText: '<i class="bi bi-clock-history me-1"></i> Lihat Riwayat Jurnal',
-            cancelButtonText: '<i class="bi bi-plus-lg me-1"></i> Tambah Jurnal Lagi'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                switchJurnalTab('riwayat');
-            } else {
-                switchJurnalTab('input');
-            }
-        });
+        // Lanjut ke pelajaran berikutnya hari itu yang belum ada jurnalnya
+        jurnalTanggal = d; jurnalSlot = null;
+        const lanjut = db.schedule.filter(s => s.Day === jurnalHariNama(d)).sort((a, b) => String(a.TimeStart).localeCompare(String(b.TimeStart))).find(s => !jurnalAda(d, s.ClassID, s.Subject));
+        if (document.getElementById('jurnal-subview-riwayat').style.display === 'block') switchJurnalTab('input');
+        if (lanjut) jurnalPilihSlot(lanjut.RecordID); else renderJurnalInput();
+        Swal.fire({ icon: 'success', title: wasEditing ? 'Jurnal diperbarui' : 'Jurnal tersimpan', text: lanjut ? 'Berikutnya: ' + lanjut.Subject + ' · ' + jadwalKelasNama(lanjut.ClassID) : '', timer: 1800, showConfirmButton: false });
     }
 
     function editJournal(id) {
         const j = db.journal.find(x => x.RecordID === id);
         if (!j) return;
         editingJournalId = id;
+        jurnalTanggal = j.Date;
         document.getElementById('jurnal-date').value = j.Date;
         document.getElementById('jurnal-kelas').value = j.ClassID;
         document.getElementById('jurnal-mapel').value = j.Subject;
@@ -6822,14 +7819,14 @@ window.AGENDA_GURU_LOADED = true;
 
     function cancelEditJurnal() {
         editingJournalId = null;
-        document.getElementById('btn-save-jurnal').innerHTML = '<i class="bi bi-save me-1"></i> Simpan';
+        document.getElementById('btn-save-jurnal').innerHTML = '<i class="bi bi-save me-1"></i> Simpan jurnal';
         document.getElementById('btn-cancel-edit-jurnal').style.display = 'none';
         document.getElementById('jurnal-content').value = '';
         clearJurnalFile();
         currentJurnalPhotoBase64 = null;
         const titleElem = document.getElementById('jurnal-form-title');
         if (titleElem) {
-            titleElem.innerHTML = '<i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Jurnal Harian';
+            titleElem.innerHTML = 'Isi jurnal';
         }
     }
 
@@ -6886,140 +7883,205 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // --- Schedule / Jadwal ---
+    // =====================================================================
+    // JADWAL PELAJARAN — tampilan seminggu, tambah langsung di kolom hari, pilih "jam ke".
+    // Struktur data TIDAK berubah: db.schedule { RecordID, Day, TimeStart, TimeEnd, Subject, ClassID }.
+    // Pengaturan jam pelajaran sekolah (baru) disimpan di db.config.jamPelajaran.
+    // =====================================================================
+    const AG_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const JAM_BAWAAN = { mulai: '07:00', durasi: 35, jumlah: 10, istirahatSetelah: 4, istirahatMenit: 20 };
+    let jadwalTambahHari = '', jadwalHariHP = '';
+    function jamPengaturan() { return Object.assign({}, JAM_BAWAAN, db.config && db.config.jamPelajaran || {}); }
+    function agMenit(hhmm) { const p = String(hhmm || '').replace('.', ':').split(':').map(Number); return p.length === 2 && !isNaN(p[0]) ? p[0] * 60 + (p[1] || 0) : null; }
+    function agJam(m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+    function jamSlot() {
+        const c = jamPengaturan(), out = []; let t = agMenit(c.mulai) || 420;
+        for (let i = 1; i <= Math.min(Number(c.jumlah) || 10, 16); i++) {
+            out.push({ ke: i, mulai: agJam(t), selesai: agJam(t + Number(c.durasi || 35)) });
+            t += Number(c.durasi || 35);
+            if (i === Number(c.istirahatSetelah)) t += Number(c.istirahatMenit || 0);
+        }
+        return out;
+    }
+    function jamLabel(s) {
+        const slot = jamSlot(), a = slot.find(x => x.mulai === s.TimeStart), b = slot.find(x => x.selesai === s.TimeEnd);
+        const waktu = String(s.TimeStart).replace(':', '.') + '–' + String(s.TimeEnd).replace(':', '.');
+        return a && b ? `Jam ${a.ke === b.ke ? a.ke : a.ke + '–' + b.ke} · ${waktu}` : waktu;
+    }
+    function jadwalWarna(subj) {
+        const w = ['#E4ECF7', '#E3F4EC', '#FBF0DC', '#F1E8FA', '#FBE6E6', '#E2F6F8', '#F3EEE4', '#EEF2F8'];
+        let h = 0; String(subj).split('').forEach(ch => h = (h * 31 + ch.charCodeAt(0)) % 997); return w[h % w.length];
+    }
+    // Guru pengampu disimpan terpisah di db.jadwalGuru { RecordID (= RecordID jadwal), Guru }
+    // agar tersimpan ke Spreadsheet (sheet X_jadwalGuru) tanpa perlu memperbarui Code.gs.
+    function jadwalGuru(id) { return ((db.jadwalGuru || []).find(x => String(x.RecordID) === String(id)) || {}).Guru || ''; }
+    function setJadwalGuru(id, nama) {
+        if (!db.jadwalGuru) db.jadwalGuru = [];
+        nama = String(nama || '').trim();
+        db.jadwalGuru = db.jadwalGuru.filter(x => String(x.RecordID) !== String(id));
+        if (nama) db.jadwalGuru.push({ RecordID: id, Guru: nama });
+    }
+    function jadwalDaftarGuru() { return [...new Set((db.jadwalGuru || []).map(x => String(x.Guru || '').trim()).filter(Boolean))].sort(); }
+    function jadwalGuruMapel(subj) {   // guru yang terakhir dipakai untuk mapel ini (untuk isian otomatis)
+        const ids = db.schedule.filter(s => s.Subject === subj).map(s => s.RecordID).reverse();
+        for (const id of ids) { const g = jadwalGuru(id); if (g) return g; }
+        return '';
+    }
+    function jadwalKelasNama(cid) { return cid === 'All' ? 'Semua kelas' : (db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid); }
+
     function renderSchedule() {
+        const fs = document.getElementById('filter-sched-class');
+        if (fs && !fs.value && db.classes.length) { let ing = ''; try { ing = localStorage.getItem(KELAS_INGAT_KEY) || ''; } catch (e) { } fs.value = db.classes.some(c => String(c.ClassID) === ing) ? ing : String(db.classes[0].ClassID); }
         const cFilter = document.getElementById('filter-sched-class').value, container = document.getElementById('schedule-container');
-        if (!cFilter) { container.innerHTML = `<div class="col-12 text-center text-muted py-5"><i class="bi bi-calendar-x" style="font-size: 3rem;"></i><p>Pilih kelas terlebih dahulu.</p></div>`; return; }
-        let html = '';
-        ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'].forEach(day => {
-            let daySch = db.schedule.filter(s => s.Day === day && (cFilter === 'All' || String(s.ClassID) === String(cFilter) || s.ClassID === 'All')).sort((a, b) => a.TimeStart.localeCompare(b.TimeStart));
-            html += `<div class="col-md-4 mb-4"><div class="card shadow-sm border-0 h-100"><div class="card-header bg-primary text-white fw-bold text-center py-2">${day}</div><ul class="list-group list-group-flush">`;
-            if (daySch.length === 0) {
-                html += `<li class="list-group-item text-center text-muted small py-3">Libur / Kosong</li>`;
-            } else {
-                daySch.forEach(s => {
-                    let className = s.ClassID === 'All' ? 'Semua Kelas' : (db.classes.find(c => String(c.ClassID) === String(s.ClassID))?.ClassName || s.ClassID);
-                    html += `
-                        <li class="list-group-item px-3 py-2">
-                            <div class="d-flex justify-content-between align-items-center mb-1">
-                                <span class="badge bg-warning text-dark"><i class="bi bi-clock"></i> ${s.TimeStart} - ${s.TimeEnd}</span>
-                                <div>
-                                    <button class="btn btn-sm btn-link text-primary p-0 me-2" onclick="editSchedule('${s.RecordID}')" title="Edit Jadwal"><i class="bi bi-pencil-square"></i></button>
-                                    <button class="btn btn-sm btn-link text-danger p-0" onclick="deleteSchedule('${s.RecordID}')" title="Hapus Jadwal"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </div>
-                            <div class="fw-semibold text-primary">${escapeHtml(s.Subject)}</div>
-                            <small class="text-muted fw-bold" style="font-size:0.75rem">${className}</small>
-                        </li>`;
-                });
+        const info = document.getElementById('jam-pelajaran-info');
+        if (info) { const c = jamPengaturan(); info.innerHTML = `<b>Jam pelajaran sekolah:</b> mulai ${c.mulai.replace(':', '.')} · 1 jam = ${c.durasi} menit · istirahat ${c.istirahatMenit} menit setelah jam ke-${c.istirahatSetelah}`; }
+        if (!cFilter) { container.innerHTML = `<div class="ag-empty"><i class="bi bi-calendar-x"></i><p>Pilih kelas terlebih dahulu.</p></div>`; return; }
+        const hariIni = ['Minggu', ...AG_HARI][new Date().getDay()];
+        if (!jadwalHariHP) jadwalHariHP = AG_HARI.includes(hariIni) ? hariIni : 'Senin';
+        const slot = jamSlot(), mapel = db.subjects || [];
+        let html = `<div class="ag-daytabs" role="tablist" aria-label="Hari">${AG_HARI.map(d => `<button type="button" role="tab" class="ag-daytab${d === jadwalHariHP ? ' on' : ''}" aria-selected="${d === jadwalHariHP}" onclick="jadwalHariHP='${d}'; renderSchedule()">${d.slice(0, 3)}</button>`).join('')}</div><div class="ag-week">`;
+        AG_HARI.forEach(day => {
+            const items = db.schedule.filter(s => s.Day === day && (cFilter === 'All' || String(s.ClassID) === String(cFilter) || s.ClassID === 'All')).sort((a, b) => String(a.TimeStart).localeCompare(String(b.TimeStart)));
+            const today = day === hariIni, adding = jadwalTambahHari === day;
+            html += `<section class="ag-daycol${today ? ' today' : ''}${day === jadwalHariHP ? ' sel' : ''}" aria-label="${day}">
+                <div class="ag-dayhead"><b>${day}</b><span>${today ? 'Hari ini' : items.length + ' pelajaran'}</span></div><div class="ag-daybody">`;
+            items.forEach(s => {
+                html += `<button type="button" class="ag-lesson" style="background:${jadwalWarna(s.Subject)}" onclick="editSchedule('${escapeHtml(s.RecordID)}')" title="Ubah atau hapus">
+                    <small>${escapeHtml(jamLabel(s))}</small><b>${escapeHtml(s.Subject)}</b>${jadwalGuru(s.RecordID) ? `<small class="ag-lesson-guru"><i class="bi bi-person"></i> ${escapeHtml(jadwalGuru(s.RecordID))}</small>` : ''}${cFilter === 'All' || s.ClassID === 'All' ? `<small>${escapeHtml(jadwalKelasNama(s.ClassID))}</small>` : ''}</button>`;
+            });
+            if (!items.length && !adding) html += '<p class="ag-dayempty">Libur / kosong</p>';
+            if (adding) {
+                const akhir = items.length ? agMenit(items[items.length - 1].TimeEnd) : null;
+                const awalKe = (slot.find(x => akhir !== null && agMenit(x.mulai) >= akhir) || slot[0]).ke;
+                html += `<div class="ag-addform">
+                    <label>Dari jam ke<select id="jd-dari">${slot.map(x => `<option value="${x.ke}"${x.ke === awalKe ? ' selected' : ''}>${x.ke} (${x.mulai.replace(':', '.')})</option>`).join('')}</select></label>
+                    <label>Sampai jam ke<select id="jd-sampai">${slot.map(x => `<option value="${x.ke}"${x.ke === Math.min(awalKe + 1, slot.length) ? ' selected' : ''}>${x.ke} (${x.selesai.replace(':', '.')})</option>`).join('')}</select></label>
+                    <label>Mapel<select id="jd-mapel" onchange="const g=document.getElementById('jd-guru'); if (g && !g.value) g.value = jadwalGuruMapel(this.value);"><option value="">-- Pilih --</option>${mapel.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}</select></label>
+                    ${cFilter === 'All' ? `<label>Kelas<select id="jd-kelas">${db.classes.map(c => `<option value="${escapeHtml(c.ClassID)}">${escapeHtml(c.ClassName)}</option>`).join('')}</select></label>` : ''}
+                    <label>Guru pengampu <span class="fw-normal">(opsional)</span><input type="text" id="jd-guru" list="jd-guru-list" placeholder="Contoh: Budi Santoso, S.Pd." autocomplete="off"></label>
+                    <datalist id="jd-guru-list">${jadwalDaftarGuru().map(g => `<option value="${escapeHtml(g)}">`).join('')}</datalist>
+                    <label class="ag-checkline"><input type="checkbox" id="jd-cal" checked> Buat juga di Google Calendar</label>
+                    <button type="button" class="ag-btn ag-btn-primary" onclick="jadwalSimpanBaru('${day}')">Simpan</button>
+                </div>`;
             }
-            html += `</ul></div></div>`;
-        }); container.innerHTML = html;
+            html += `<button type="button" class="ag-addbtn" onclick="jadwalTambahHari = jadwalTambahHari === '${day}' ? '' : '${day}'; renderSchedule()">${adding ? 'Batal' : '+ Tambah'}</button></div></section>`;
+        });
+        container.innerHTML = html + '</div>';
     }
-
     function showAddScheduleModal() {
-        editingScheduleId = null;
-        document.getElementById('modal-schedule-title').innerText = "Tambah Jadwal Pelajaran";
-        document.getElementById('sched-day').value = 'Senin';
-        document.getElementById('sched-start').value = '';
-        document.getElementById('sched-end').value = '';
-        document.getElementById('sched-subject').value = '';
-        document.getElementById('sched-class').value = '';
-
-        let modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalAddSchedule'));
-        if (!modalInstance) modalInstance = new bootstrap.Modal(document.getElementById('modalAddSchedule'));
-        modalInstance.show();
+        const hariIni = ['Minggu', ...AG_HARI][new Date().getDay()];
+        jadwalTambahHari = AG_HARI.includes(hariIni) ? hariIni : 'Senin'; jadwalHariHP = jadwalTambahHari; renderSchedule();
     }
-
-    function editSchedule(id) {
-        const s = db.schedule.find(x => x.RecordID === id);
-        if (!s) return;
-
-        editingScheduleId = id;
-        document.getElementById('modal-schedule-title').innerText = "Edit Jadwal Pelajaran";
-        document.getElementById('sched-day').value = s.Day;
-        document.getElementById('sched-start').value = s.TimeStart;
-        document.getElementById('sched-end').value = s.TimeEnd;
-        document.getElementById('sched-subject').value = s.Subject;
-        document.getElementById('sched-class').value = s.ClassID;
-
-        let modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalAddSchedule'));
-        if (!modalInstance) modalInstance = new bootstrap.Modal(document.getElementById('modalAddSchedule'));
-        modalInstance.show();
+    function jadwalSimpanBaru(day) {
+        const cFilter = document.getElementById('filter-sched-class').value, slot = jamSlot();
+        const a = slot.find(x => x.ke === Number(document.getElementById('jd-dari').value)), b = slot.find(x => x.ke === Number(document.getElementById('jd-sampai').value));
+        const subj = document.getElementById('jd-mapel').value, cid = cFilter === 'All' ? document.getElementById('jd-kelas')?.value : cFilter;
+        const guru = (document.getElementById('jd-guru')?.value || '').trim();
+        if (!subj) return Swal.fire('Mapel belum dipilih', 'Pilih mata pelajaran. Tambah mapel baru lewat tombol + di menu Data Nilai atau Manajemen Kelas.', 'warning');
+        if (!a || !b || b.ke < a.ke) return Swal.fire('Jam tidak sesuai', '"Sampai jam ke" tidak boleh lebih awal dari "Dari jam ke".', 'warning');
+        const bentrok = db.schedule.find(s => s.Day === day && String(s.ClassID) === String(cid) && agMenit(s.TimeStart) < agMenit(b.selesai) && agMenit(s.TimeEnd) > agMenit(a.mulai));
+        const simpan = () => {
+            const idBaru = 'SCH' + Date.now();
+            db.schedule.push({ RecordID: idBaru, Day: day, TimeStart: a.mulai, TimeEnd: b.selesai, Subject: subj, ClassID: cid });
+            setJadwalGuru(idBaru, guru);
+            if (document.getElementById('jd-cal')?.checked && typeof google !== 'undefined') {
+                google.script.run.syncToCalendar('schedule', { day, start: a.mulai, end: b.selesai, subject: subj, className: jadwalKelasNama(cid) }, getToken());
+            }
+            jadwalTambahHari = ''; syncDB(); renderSchedule();
+        };
+        if (bentrok) {
+            Swal.fire({ icon: 'warning', title: 'Jam bertabrakan', text: `Sudah ada ${bentrok.Subject} (${jamLabel(bentrok)}) di ${day}. Tetap simpan?`, showCancelButton: true, confirmButtonText: 'Tetap simpan', cancelButtonText: 'Batal' })
+                .then(r => { if (r.isConfirmed) simpan(); });
+        } else simpan();
     }
-
-    function deleteSchedule(id) {
-        Swal.fire({
-            title: 'Hapus Jadwal?', text: "Apakah Anda yakin ingin menghapus jadwal ini?", icon: 'warning',
-            showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, Hapus!'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                db.schedule = db.schedule.filter(s => s.RecordID !== id);
-                syncDB(); renderSchedule(); Swal.fire('Terhapus!', 'Jadwal berhasil dihapus.', 'success');
+    async function editSchedule(id) {
+        const s = db.schedule.find(x => x.RecordID === id); if (!s) return;
+        const mapel = db.subjects || [];
+        const r = await Swal.fire({
+            title: 'Ubah jadwal',
+            html: `<div class="text-start">
+                <label class="form-label small fw-bold mb-1" for="es-hari">Hari</label><select id="es-hari" class="form-select mb-2">${AG_HARI.map(d => `<option${d === s.Day ? ' selected' : ''}>${d}</option>`).join('')}</select>
+                <div class="row g-2 mb-2"><div class="col-6"><label class="form-label small fw-bold mb-1" for="es-mulai">Mulai</label><input type="time" id="es-mulai" class="form-control" value="${escapeHtml(s.TimeStart)}"></div>
+                <div class="col-6"><label class="form-label small fw-bold mb-1" for="es-selesai">Selesai</label><input type="time" id="es-selesai" class="form-control" value="${escapeHtml(s.TimeEnd)}"></div></div>
+                <label class="form-label small fw-bold mb-1" for="es-mapel">Mapel</label><select id="es-mapel" class="form-select mb-2">${(mapel.includes(s.Subject) ? mapel : [s.Subject, ...mapel]).map(m => `<option${m === s.Subject ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('')}</select>
+                <label class="form-label small fw-bold mb-1" for="es-guru">Guru pengampu (opsional)</label><input type="text" id="es-guru" class="form-control mb-2" list="es-guru-list" value="${escapeHtml(jadwalGuru(s.RecordID))}" placeholder="Contoh: Budi Santoso, S.Pd." autocomplete="off"><datalist id="es-guru-list">${jadwalDaftarGuru().map(g => `<option value="${escapeHtml(g)}">`).join('')}</datalist>
+                <label class="form-label small fw-bold mb-1" for="es-kelas">Kelas</label><select id="es-kelas" class="form-select">${db.classes.map(c => `<option value="${escapeHtml(c.ClassID)}"${String(c.ClassID) === String(s.ClassID) ? ' selected' : ''}>${escapeHtml(c.ClassName)}</option>`).join('')}${s.ClassID === 'All' ? '<option value="All" selected>Semua kelas</option>' : ''}</select></div>`,
+            showCancelButton: true, showDenyButton: true, confirmButtonText: 'Simpan', denyButtonText: 'Hapus jadwal', cancelButtonText: 'Batal',
+            preConfirm: () => {
+                const v = { Day: document.getElementById('es-hari').value, TimeStart: document.getElementById('es-mulai').value, TimeEnd: document.getElementById('es-selesai').value, Subject: document.getElementById('es-mapel').value, ClassID: document.getElementById('es-kelas').value, guru: document.getElementById('es-guru').value };
+                if (!v.TimeStart || !v.TimeEnd || agMenit(v.TimeEnd) <= agMenit(v.TimeStart)) { Swal.showValidationMessage('Jam selesai harus setelah jam mulai.'); return false; }
+                return v;
             }
         });
+        if (r.isConfirmed) { const { guru, ...v } = r.value; Object.assign(s, v); setJadwalGuru(s.RecordID, guru); syncDB(); renderSchedule(); }
+        else if (r.isDenied) deleteSchedule(id);
     }
-
-    function saveSchedule() {
-        const day = document.getElementById('sched-day').value,
-            start = document.getElementById('sched-start').value,
-            end = document.getElementById('sched-end').value,
-            subj = document.getElementById('sched-subject').value,
-            cid = document.getElementById('sched-class').value;
-        const syncCal = document.getElementById('sched-sync-cal').checked;
-
-        if (!start || !end || !subj || !cid) return Swal.fire('Error', 'Harap lengkapi semua form!', 'error');
-
-        let className = db.classes.find(c => String(c.ClassID) === String(cid))?.ClassName || cid;
-
-        if (editingScheduleId) {
-            let idx = db.schedule.findIndex(s => s.RecordID === editingScheduleId);
-            if (idx >= 0) {
-                db.schedule[idx].Day = day; db.schedule[idx].TimeStart = start; db.schedule[idx].TimeEnd = end; db.schedule[idx].Subject = subj; db.schedule[idx].ClassID = cid;
+    function deleteSchedule(id) {
+        Swal.fire({ title: 'Hapus jadwal?', text: 'Jadwal pelajaran ini akan dihapus.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal' })
+            .then(result => {
+                if (!result.isConfirmed) return;
+                db.schedule = db.schedule.filter(s => s.RecordID !== id);
+                setJadwalGuru(id, '');
+                syncDB(); renderSchedule();
+                Swal.fire({ icon: 'success', title: 'Terhapus', timer: 1200, showConfirmButton: false });
+            });
+    }
+    function saveSchedule() { renderSchedule(); }   // nama lama; penyimpanan kini lewat jadwalSimpanBaru / editSchedule
+    async function jadwalAturJam() {
+        const c = jamPengaturan();
+        const r = await Swal.fire({
+            title: 'Atur jam pelajaran',
+            html: `<div class="text-start">
+                <div class="row g-2 mb-2"><div class="col-6"><label class="form-label small fw-bold mb-1" for="jp-mulai">Jam masuk</label><input type="time" id="jp-mulai" class="form-control" value="${c.mulai}"></div>
+                <div class="col-6"><label class="form-label small fw-bold mb-1" for="jp-durasi">1 jam pelajaran (menit)</label><input type="number" id="jp-durasi" class="form-control" min="20" max="90" value="${c.durasi}"></div></div>
+                <div class="row g-2 mb-2"><div class="col-6"><label class="form-label small fw-bold mb-1" for="jp-ist">Istirahat setelah jam ke</label><input type="number" id="jp-ist" class="form-control" min="0" max="12" value="${c.istirahatSetelah}"></div>
+                <div class="col-6"><label class="form-label small fw-bold mb-1" for="jp-istm">Lama istirahat (menit)</label><input type="number" id="jp-istm" class="form-control" min="0" max="90" value="${c.istirahatMenit}"></div></div>
+                <label class="form-label small fw-bold mb-1" for="jp-jml">Jumlah jam pelajaran per hari</label><input type="number" id="jp-jml" class="form-control" min="1" max="16" value="${c.jumlah}">
+                <p class="small text-muted mt-2 mb-0">Jadwal yang sudah ada tidak berubah. Pengaturan ini dipakai saat menambah jadwal baru.</p></div>`,
+            showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Batal',
+            preConfirm: () => {
+                const v = { mulai: document.getElementById('jp-mulai').value, durasi: Number(document.getElementById('jp-durasi').value), istirahatSetelah: Number(document.getElementById('jp-ist').value), istirahatMenit: Number(document.getElementById('jp-istm').value), jumlah: Number(document.getElementById('jp-jml').value) };
+                if (!v.mulai || !(v.durasi >= 10) || !(v.jumlah >= 1)) { Swal.showValidationMessage('Lengkapi jam masuk, lama jam pelajaran, dan jumlah jam.'); return false; }
+                return v;
             }
-        } else {
-            db.schedule.push({ RecordID: "SCH" + Date.now(), Day: day, TimeStart: start, TimeEnd: end, Subject: subj, ClassID: cid });
-
-            // Tambah ke Calendar otomatis khusus saat Jadwal Baru dibuat (bukan edit)
-            if (syncCal && typeof google !== 'undefined') {
-                google.script.run.syncToCalendar('schedule', { day: day, start: start, end: end, subject: subj, className: className }, getToken());
-            }
-        }
-
-        closeModal('modalAddSchedule'); renderSchedule(); syncDB();
-        let msg = editingScheduleId ? 'Jadwal diperbarui.' : 'Jadwal ditambahkan.';
-        Swal.fire('Tersimpan', msg, 'success');
-        editingScheduleId = null;
+        });
+        if (!r.isConfirmed) return;
+        db.config.jamPelajaran = r.value; syncDB(); renderSchedule();
+    }
+    async function jadwalSalinHari() {
+        const cFilter = document.getElementById('filter-sched-class').value;
+        if (!cFilter || cFilter === 'All') return Swal.fire('Pilih satu kelas', 'Penyalinan jadwal dilakukan per kelas. Pilih kelasnya terlebih dahulu.', 'info');
+        const opsi = AG_HARI.map(d => `<option>${d}</option>`).join('');
+        const r = await Swal.fire({
+            title: 'Salin jadwal', html: `<div class="text-start"><label class="form-label small fw-bold mb-1" for="sj-dari">Salin dari</label><select id="sj-dari" class="form-select mb-2">${opsi}</select>
+                <label class="form-label small fw-bold mb-1" for="sj-ke">Ke hari</label><select id="sj-ke" class="form-select">${opsi.replace('<option>Selasa</option>', '<option selected>Selasa</option>')}</select></div>`,
+            showCancelButton: true, confirmButtonText: 'Salin', cancelButtonText: 'Batal',
+            preConfirm: () => { const v = { dari: document.getElementById('sj-dari').value, ke: document.getElementById('sj-ke').value }; if (v.dari === v.ke) { Swal.showValidationMessage('Pilih dua hari yang berbeda.'); return false; } return v; }
+        });
+        if (!r.isConfirmed) return;
+        const sumber = db.schedule.filter(s => s.Day === r.value.dari && String(s.ClassID) === String(cFilter));
+        if (!sumber.length) return Swal.fire('Tidak ada jadwal', `Belum ada jadwal di hari ${r.value.dari} untuk kelas ini.`, 'info');
+        let n = 0;
+        sumber.forEach((s, i) => {
+            if (db.schedule.some(x => x.Day === r.value.ke && String(x.ClassID) === String(cFilter) && x.TimeStart === s.TimeStart && x.Subject === s.Subject)) return;
+            const idSalin = 'SCH' + Date.now() + '_' + i;
+            db.schedule.push({ RecordID: idSalin, Day: r.value.ke, TimeStart: s.TimeStart, TimeEnd: s.TimeEnd, Subject: s.Subject, ClassID: s.ClassID });
+            setJadwalGuru(idSalin, jadwalGuru(s.RecordID)); n++;
+        });
+        syncDB(); jadwalHariHP = r.value.ke; renderSchedule();
+        Swal.fire({ icon: 'success', title: `${n} jadwal disalin ke ${r.value.ke}`, timer: 1800, showConfirmButton: false });
     }
 
     // --- Manajemen Kelas (Pemisahan Tab Siswa/Kelas & Mata Pelajaran) ---
     let editingManajemenMapelName = null;
 
     function switchKelasTab(tab) {
-        const siswaView = document.getElementById('kelas-subview-siswa');
-        const mapelView = document.getElementById('kelas-subview-mapel');
-        const btnSiswa = document.getElementById('btn-tab-kelas-siswa');
-        const btnMapel = document.getElementById('btn-tab-kelas-mapel');
-
-        if (!siswaView || !btnSiswa) return;
-
-        if (tab === 'mapel') {
-            siswaView.style.display = 'none';
-            if (mapelView) mapelView.style.display = 'block';
-
-            btnSiswa.className = 'btn btn-outline-primary';
-            if (btnMapel) btnMapel.className = 'btn btn-primary';
-
-            renderManajemenMapelTable();
-        } else {
-            // Default: 'siswa'
-            siswaView.style.display = 'block';
-            if (mapelView) mapelView.style.display = 'none';
-
-            btnSiswa.className = 'btn btn-primary';
-            if (btnMapel) btnMapel.className = 'btn btn-outline-primary';
-
-            renderStudentsTable();
-        }
+        const m = tab === 'mapel';
+        document.getElementById('kelas-subview-siswa').style.display = m ? 'none' : '';
+        const mv = document.getElementById('kelas-subview-mapel'); if (mv) mv.style.display = m ? 'block' : 'none';
+        document.getElementById('btn-tab-kelas-siswa').classList.toggle('active', !m);
+        document.getElementById('btn-tab-kelas-mapel')?.classList.toggle('active', m);
+        if (m) renderManajemenMapelTable(); else renderStudentsTable();
     }
 
     function renderManajemenMapelTable() {
@@ -7145,231 +8207,197 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     // --- Poin Siswa (Pemisahan Tab Input Poin & Riwayat Poin) ---
+    // =====================================================================
+    // POIN SISWA — pilih jenis → kejadian → centang beberapa siswa sekaligus → simpan.
+    // Struktur data TIDAK berubah: db.poin { RecordID, ClassID, StudentID, Tanggal, PoinReward, PoinPelanggaran, Keterangan }.
+    // Daftar kejadian disimpan di db.config.poinKejadian (bisa diubah guru).
+    // =====================================================================
+    const POIN_KEJADIAN_BAWAAN = [
+        { nama: 'Terlambat masuk kelas', poin: -5 }, { nama: 'Tidak mengerjakan PR', poin: -5 }, { nama: 'Atribut tidak lengkap', poin: -3 },
+        { nama: 'Membuang sampah sembarangan', poin: -3 }, { nama: 'Alpha tanpa keterangan', poin: -10 }, { nama: 'Berkelahi', poin: -20 },
+        { nama: 'Aktif di kelas', poin: 5 }, { nama: 'Membantu teman', poin: 5 }, { nama: 'Menjaga kebersihan kelas', poin: 5 },
+        { nama: 'Petugas upacara', poin: 10 }, { nama: 'Juara lomba', poin: 20 }
+    ];
+    let poinJenis = 'neg', poinKejadianKe = 0, poinPilih = new Set(), poinCari = '';
+    function poinDaftarKejadian() {
+        const d = db.config && Array.isArray(db.config.poinKejadian) && db.config.poinKejadian.length ? db.config.poinKejadian : POIN_KEJADIAN_BAWAAN;
+        return d.filter(k => k && k.nama && Number(k.poin));
+    }
+    function poinFmt(n) { return (n > 0 ? '+' : '') + n; }
+
     function switchPoinTab(tab) {
-        const inputView = document.getElementById('poin-subview-input');
-        const riwayatView = document.getElementById('poin-subview-riwayat');
-        const btnInput = document.getElementById('btn-tab-poin-input');
-        const btnRiwayat = document.getElementById('btn-tab-poin-riwayat');
-
-        if (!inputView || !riwayatView || !btnInput || !btnRiwayat) return;
-
-        if (tab === 'riwayat') {
-            inputView.style.display = 'none';
-            riwayatView.style.display = 'block';
-
-            btnInput.className = 'btn btn-outline-primary';
-            btnRiwayat.className = 'btn btn-primary';
-
-            // Sinkronkan pilihan kelas riwayat dengan kelas input
-            const inputClass = document.getElementById('poin-kelas')?.value;
-            const filterClass = document.getElementById('filter-poin-kelas');
-            if (filterClass && inputClass && !filterClass.value) {
-                filterClass.value = inputClass;
-            }
+        const r = tab === 'riwayat';
+        document.getElementById('poin-subview-input').style.display = r ? 'none' : '';
+        document.getElementById('poin-subview-riwayat').style.display = r ? 'block' : 'none';
+        document.getElementById('btn-tab-poin-input').classList.toggle('active', !r);
+        document.getElementById('btn-tab-poin-riwayat').classList.toggle('active', r);
+        if (r) {
+            const f = document.getElementById('filter-poin-kelas'), cid = document.getElementById('poin-kelas')?.value;
+            if (f && cid) f.value = cid;
             loadPoinData();
-        } else {
-            // Default: 'input'
-            inputView.style.display = 'block';
-            riwayatView.style.display = 'none';
-
-            btnInput.className = 'btn btn-primary';
-            btnRiwayat.className = 'btn btn-outline-primary';
-
-            updateQuickPoinSummary();
-        }
+        } else renderPoinInput();
     }
+    function populatePoinStudentSelect() { poinPilih = new Set(); renderPoinInput(); }
+    function updateQuickPoinSummary() { if (document.getElementById('poin-subview-input')?.style.display !== 'none') renderPoinInput(); }
 
-    function populatePoinStudentSelect() {
-        const cid = document.getElementById('poin-kelas').value;
-        const select = document.getElementById('poin-siswa');
-        if (!cid) {
-            select.innerHTML = '<option value="">-- Pilih Kelas Dahulu --</option>';
-            updateQuickPoinSummary();
-            return;
-        }
-
-        const students = db.students.filter(s => String(s.ClassID) === String(cid));
-        if (students.length === 0) {
-            select.innerHTML = '<option value="">-- Tidak ada siswa di kelas ini --</option>';
-            updateQuickPoinSummary();
-            return;
-        }
-
-        let opts = '<option value="">-- Pilih Siswa --</option>';
-        students.forEach(s => opts += `<option value="${escapeHtml(s.StudentID)}">${escapeHtml(s.StudentName)}</option>`);
-        select.innerHTML = opts;
-
-        // Sinkronkan juga filter kelas riwayat
-        const filterClass = document.getElementById('filter-poin-kelas');
-        if (filterClass && !filterClass.value) {
-            filterClass.value = cid;
-        }
-
-        updateQuickPoinSummary();
-    }
-
-    function updateQuickPoinSummary() {
+    function renderPoinInput() {
+        const box = document.getElementById('poin-subview-input'); if (!box) return;
         const cid = document.getElementById('poin-kelas')?.value;
-        const tbody = document.getElementById('poin-quick-summary-tbody');
-        if (!tbody) return;
+        if (!cid) { box.innerHTML = '<div class="card-custom"><div class="card-body"><div class="alert alert-secondary text-center mb-0">Pilih kelas terlebih dahulu.</div></div></div>'; return; }
+        const stds = absenSiswa(cid);
+        if (!stds.length) { box.innerHTML = '<div class="card-custom"><div class="card-body"><div class="alert alert-secondary text-center mb-0">Belum ada siswa di kelas ini. Tambahkan siswa di menu Manajemen Kelas.</div></div></div>'; return; }
+        const ids = new Set(stds.map(s => String(s.StudentID)));
+        poinPilih = new Set([...poinPilih].filter(x => ids.has(x)));
+        const semua = poinDaftarKejadian(), daftar = semua.filter(k => poinJenis === 'neg' ? Number(k.poin) < 0 : Number(k.poin) > 0);
+        if (poinKejadianKe !== 'lain' && (poinKejadianKe >= daftar.length || poinKejadianKe < 0)) poinKejadianKe = daftar.length ? 0 : 'lain';
+        const total = {}; stds.forEach(s => total[s.StudentID] = 0);
+        (db.poin || []).filter(p => String(p.ClassID) === String(cid)).forEach(p => { if (total[p.StudentID] !== undefined) total[p.StudentID] += (Number(p.PoinReward) || 0) - (Number(p.PoinPelanggaran) || 0); });
 
-        if (!cid) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3 text-muted">Silakan pilih kelas pada formulir di atas untuk melihat ringkasan poin.</td></tr>';
-            return;
-        }
-
-        const students = db.students.filter(s => String(s.ClassID) === String(cid));
-        if (students.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3 text-muted">Belum ada siswa pada kelas ini.</td></tr>';
-            return;
-        }
-
-        const records = db.poin.filter(p => String(p.ClassID) === String(cid));
-        let rekap = {};
-        students.forEach(s => {
-            rekap[s.StudentID] = { name: s.StudentName, reward: 0, pelanggaran: 0 };
+        let html = `<div class="ag-split"><div class="card-custom ag-split-main"><div class="card-body ag-panel">
+            <div class="ag-steptitle">1 · Jenis poin</div>
+            <div class="ag-jenis">
+                <button type="button" class="ag-jenis-btn neg${poinJenis === 'neg' ? ' on' : ''}" aria-pressed="${poinJenis === 'neg'}" onclick="poinSetJenis('neg')">− Pelanggaran</button>
+                <button type="button" class="ag-jenis-btn pos${poinJenis === 'pos' ? ' on' : ''}" aria-pressed="${poinJenis === 'pos'}" onclick="poinSetJenis('pos')">+ Prestasi</button>
+            </div>
+            <div class="ag-steprow"><div class="ag-steptitle">2 · Kejadian</div><button type="button" class="ag-linkbtn" onclick="poinAturKejadian()">Atur daftar kejadian</button></div>
+            <div class="ag-chips">`;
+        daftar.forEach((k, i) => {
+            const on = poinKejadianKe === i;
+            html += `<button type="button" class="ag-chip${on ? ' on' : ''}" aria-pressed="${on}" onclick="poinSetKejadian(${i})">${escapeHtml(k.nama)} <b class="${k.poin < 0 ? 't-A' : 't-H'}">${poinFmt(Number(k.poin))}</b></button>`;
         });
-
-        records.forEach(p => {
-            if (rekap[p.StudentID]) {
-                rekap[p.StudentID].reward += Number(p.PoinReward) || 0;
-                rekap[p.StudentID].pelanggaran += Number(p.PoinPelanggaran) || 0;
+        html += `<button type="button" class="ag-chip ag-chip-dash${poinKejadianKe === 'lain' ? ' on' : ''}" aria-pressed="${poinKejadianKe === 'lain'}" onclick="poinSetKejadian('lain')">Lainnya…</button></div>`;
+        if (poinKejadianKe === 'lain') {
+            html += `<div class="ag-newform">
+                <label class="ag-grow">Keterangan<input type="text" id="poin-lain-ket" placeholder="${poinJenis === 'neg' ? 'Contoh: Bermain HP saat pelajaran' : 'Contoh: Juara kelas kaligrafi'}" oninput="poinSegarkanBar()"></label>
+                <label>Poin<input type="number" id="poin-lain-nilai" min="1" value="5" style="width:96px" oninput="poinSegarkanBar()"></label>
+            </div>`;
+        }
+        html += `<div class="ag-steprow"><div class="ag-steptitle">3 · Pilih siswa <span class="ag-steptitle-note" id="poin-jml-pilih">(${poinPilih.size} dipilih)</span></div>
+                <span><button type="button" class="ag-linkbtn" onclick="poinPilihSemua(true)">Pilih semua</button> <button type="button" class="ag-linkbtn" onclick="poinPilihSemua(false)">Kosongkan</button></span></div>
+            <label class="ag-search"><i class="bi bi-search"></i><span class="visually-hidden">Cari nama siswa</span>
+                <input type="search" placeholder="Cari nama siswa" value="${escapeHtml(poinCari)}" oninput="poinCari=this.value; agSaringNama('poin-list', this.value)"></label>
+            <div class="ag-checkgrid" role="group" aria-label="Pilih siswa" id="poin-list">`;
+        const q = poinCari.trim().toLowerCase();
+        stds.forEach(s => {
+            const on = poinPilih.has(String(s.StudentID)), t = total[s.StudentID], sid = escapeHtml(s.StudentID);
+            html += `<button type="button" role="checkbox" aria-checked="${on}" class="ag-checkrow${on ? ' on' : ''}" data-sid="${sid}" data-nama="${escapeHtml(String(s.StudentName).toLowerCase())}" onclick="poinToggleSiswa(this)"${!q || String(s.StudentName).toLowerCase().includes(q) ? '' : ' hidden'}>
+                <span class="ag-checkbox"><i class="bi bi-check-lg"></i></span><span class="ag-checkname">${escapeHtml(s.StudentName)}</span>
+                <span class="ag-badge ${t < 0 ? 'b-rendah' : t > 0 ? 'b-tuntas' : 'b-kosong'}">${poinFmt(t)} poin</span></button>`;
+        });
+        html += `</div>
+            <div class="ag-savebar"><span id="poin-ringkas"></span><button type="button" class="ag-btn ag-btn-accent" id="poin-btn-simpan" onclick="poinSimpan()"><i class="bi bi-save"></i> Simpan poin</button></div>
+        </div></div>`;
+        // Catatan terbaru kelas ini
+        const terbaru = (db.poin || []).filter(p => String(p.ClassID) === String(cid)).slice().sort((a, b) => String(b.Tanggal).localeCompare(String(a.Tanggal)) || String(b.RecordID).localeCompare(String(a.RecordID))).slice(0, 8);
+        html += `<div class="card-custom ag-split-side"><div class="card-body"><div class="ag-steptitle mb-2">Catatan terbaru</div>`;
+        if (!terbaru.length) html += '<p class="text-muted small mb-0">Belum ada catatan poin di kelas ini.</p>';
+        terbaru.forEach(p => {
+            const n = (Number(p.PoinReward) || 0) - (Number(p.PoinPelanggaran) || 0);
+            const nm = db.students.find(s => String(s.StudentID) === String(p.StudentID))?.StudentName || '-';
+            html += `<div class="ag-recent"><span class="ag-recent-pt ${n < 0 ? 'b-rendah' : 'b-tuntas'}">${poinFmt(n)}</span>
+                <div class="ag-recent-txt"><b>${escapeHtml(nm)}</b><small>${escapeHtml(agTglPendek(p.Tanggal))} · ${escapeHtml(p.Keterangan || '-')}</small></div>
+                <button type="button" class="ag-iconbtn ag-iconbtn-sm" onclick="deletePoin('${escapeHtml(p.RecordID)}')" title="Hapus catatan" aria-label="Hapus catatan ${escapeHtml(nm)}"><i class="bi bi-x-lg"></i></button></div>`;
+        });
+        html += `<button type="button" class="ag-linkbtn mt-2" onclick="switchPoinTab('riwayat')">Lihat semua riwayat &amp; rekap</button></div></div></div>`;
+        box.innerHTML = html;
+        poinSegarkanBar();
+    }
+    function poinKejadianAktif() {
+        if (poinKejadianKe === 'lain') {
+            const ket = (document.getElementById('poin-lain-ket')?.value || '').trim(), n = Math.abs(parseInt(document.getElementById('poin-lain-nilai')?.value, 10) || 0);
+            return { nama: ket, poin: poinJenis === 'neg' ? -n : n };
+        }
+        const d = poinDaftarKejadian().filter(k => poinJenis === 'neg' ? Number(k.poin) < 0 : Number(k.poin) > 0)[poinKejadianKe];
+        return d ? { nama: d.nama, poin: Number(d.poin) } : { nama: '', poin: 0 };
+    }
+    function poinSegarkanBar() {
+        const el = document.getElementById('poin-ringkas'); if (!el) return;
+        const k = poinKejadianAktif(), n = poinPilih.size, tgl = document.getElementById('poin-tanggal')?.value;
+        el.textContent = !n ? 'Centang siswa yang akan diberi poin.' : (!k.nama || !k.poin) ? 'Lengkapi keterangan dan jumlah poin.' :
+            `${k.nama} (${poinFmt(k.poin)}) untuk ${n} siswa · ${tgl ? formatTanggalIndo(tgl) : 'tanpa tanggal'}`;
+        const j = document.getElementById('poin-jml-pilih'); if (j) j.textContent = `(${n} dipilih)`;
+        document.getElementById('poin-btn-simpan')?.classList.toggle('is-off', !n || !k.nama || !k.poin);
+    }
+    function poinSetJenis(j) { poinJenis = j; poinKejadianKe = 0; renderPoinInput(); }
+    function poinSetKejadian(i) { poinKejadianKe = i; renderPoinInput(); if (i === 'lain') document.getElementById('poin-lain-ket')?.focus(); }
+    function poinToggleSiswa(btn) {
+        const sid = btn.dataset.sid, on = !poinPilih.has(sid);
+        if (on) poinPilih.add(sid); else poinPilih.delete(sid);
+        btn.classList.toggle('on', on); btn.setAttribute('aria-checked', on); poinSegarkanBar();
+    }
+    function poinPilihSemua(v) {
+        document.querySelectorAll('#poin-list .ag-checkrow').forEach(b => { if (b.hidden) return; if (v) poinPilih.add(b.dataset.sid); else poinPilih.delete(b.dataset.sid); b.classList.toggle('on', v); b.setAttribute('aria-checked', v); });
+        poinSegarkanBar();
+    }
+    function poinSimpan() {
+        const cid = document.getElementById('poin-kelas')?.value, tgl = document.getElementById('poin-tanggal')?.value, k = poinKejadianAktif();
+        if (!cid) return Swal.fire('Kelas belum dipilih', 'Pilih kelas terlebih dahulu.', 'warning');
+        if (!tgl) return Swal.fire('Tanggal belum diisi', 'Isi tanggal kejadian.', 'warning');
+        if (!k.nama || !k.poin) return Swal.fire('Kejadian belum lengkap', 'Pilih kejadian atau isi keterangan dan jumlah poinnya.', 'warning');
+        if (!poinPilih.size) return Swal.fire('Belum ada siswa', 'Centang minimal satu siswa.', 'warning');
+        if (!db.poin) db.poin = [];
+        const t = Date.now(), n = poinPilih.size;
+        [...poinPilih].forEach((sid, i) => db.poin.push({
+            RecordID: 'P' + t + (i ? '_' + i : ''), ClassID: cid, StudentID: sid, Tanggal: tgl,
+            PoinReward: k.poin > 0 ? k.poin : 0, PoinPelanggaran: k.poin < 0 ? -k.poin : 0, Keterangan: k.nama
+        }));
+        poinPilih = new Set(); syncDB(); renderPoinInput();
+        Swal.fire({ icon: 'success', title: 'Poin tersimpan', text: `${k.nama} (${poinFmt(k.poin)}) untuk ${n} siswa.`, timer: 1800, showConfirmButton: false });
+    }
+    async function poinAturKejadian() {
+        const teks = poinDaftarKejadian().map(k => `${k.nama} = ${poinFmt(Number(k.poin))}`).join('\n');
+        const r = await Swal.fire({
+            title: 'Atur daftar kejadian',
+            html: '<p class="small text-muted mb-2 text-start">Satu kejadian per baris, format: <b>Nama kejadian = poin</b>. Pakai tanda minus untuk pelanggaran, contoh <code>Terlambat = -5</code> atau <code>Juara lomba = +20</code>.</p>',
+            input: 'textarea', inputValue: teks, inputAttributes: { rows: 10, 'aria-label': 'Daftar kejadian' },
+            showCancelButton: true, showDenyButton: true, confirmButtonText: 'Simpan', denyButtonText: 'Kembalikan bawaan', cancelButtonText: 'Batal',
+            preConfirm: v => {
+                const out = [];
+                for (const baris of String(v).split('\n')) {
+                    if (!baris.trim()) continue;
+                    const m = baris.match(/^(.*?)\s*=\s*([+-]?\d+)\s*$/);
+                    if (!m || !m[1].trim() || !Number(m[2])) { Swal.showValidationMessage('Baris tidak sesuai format: ' + baris); return false; }
+                    out.push({ nama: m[1].trim(), poin: Number(m[2]) });
+                }
+                if (!out.length) { Swal.showValidationMessage('Isi minimal satu kejadian.'); return false; }
+                return out;
             }
         });
-
-        let html = '';
-        Object.keys(rekap).sort((a, b) => rekap[a].name.localeCompare(rekap[b].name)).forEach(sid => {
-            const r = rekap[sid];
-            const total = r.reward - r.pelanggaran;
-            html += `<tr>
-                <td class="fw-bold">${escapeHtml(r.name)}</td>
-                <td class="text-center text-success fw-bold">+${r.reward}</td>
-                <td class="text-center text-danger fw-bold">-${r.pelanggaran}</td>
-                <td class="text-center fw-bold ${total >= 0 ? 'text-success' : 'text-danger'}">${total >= 0 ? '+' : ''}${total}</td>
-            </tr>`;
-        });
-        tbody.innerHTML = html;
+        if (r.isConfirmed) db.config.poinKejadian = r.value;
+        else if (r.isDenied) delete db.config.poinKejadian;
+        else return;
+        poinKejadianKe = 0; syncDB(); renderPoinInput();
     }
-
-    function savePoin() {
-        const k = document.getElementById('poin-kelas').value;
-        const s = document.getElementById('poin-siswa').value;
-        const d = document.getElementById('poin-tanggal').value;
-        const r = Number(document.getElementById('poin-reward').value) || 0;
-        const p = Number(document.getElementById('poin-pelanggaran').value) || 0;
-        const ket = document.getElementById('poin-keterangan').value;
-
-        if (!k || !s || !d) return Swal.fire('Error', 'Harap lengkapi kelas, siswa, dan tanggal!', 'error');
-        if (r === 0 && p === 0) return Swal.fire('Peringatan', 'Harap isi poin reward atau poin pelanggaran (minimal salah satu lebih dari 0)!', 'warning');
-
-        const wasEditing = !!editingPoinId;
-        if (editingPoinId) {
-            const idx = db.poin.findIndex(x => x.RecordID === editingPoinId);
-            if (idx > -1) {
-                db.poin[idx].ClassID = k;
-                db.poin[idx].StudentID = s;
-                db.poin[idx].Tanggal = d;
-                db.poin[idx].PoinReward = r;
-                db.poin[idx].PoinPelanggaran = p;
-                db.poin[idx].Keterangan = ket;
-            }
-            cancelEditPoin();
-        } else {
-            db.poin.push({
-                RecordID: "P" + Date.now(),
-                ClassID: k,
-                StudentID: s,
-                Tanggal: d,
-                PoinReward: r,
-                PoinPelanggaran: p,
-                Keterangan: ket
-            });
-        }
-
-        syncDB();
-        loadPoinData();
-        updateQuickPoinSummary();
-
-        document.getElementById('poin-reward').value = 0;
-        document.getElementById('poin-pelanggaran').value = 0;
-        document.getElementById('poin-keterangan').value = '';
-
-        Swal.fire({
-            title: wasEditing ? 'Poin Diperbarui' : 'Poin Disimpan',
-            text: wasEditing ? 'Perubahan catatan poin berhasil disimpan.' : 'Catatan poin siswa berhasil disimpan ke sistem.',
-            icon: 'success',
-            showCancelButton: true,
-            confirmButtonText: '<i class="bi bi-clock-history me-1"></i> Lihat Riwayat Poin',
-            cancelButtonText: '<i class="bi bi-plus-lg me-1"></i> Input Poin Lagi'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                switchPoinTab('riwayat');
-            } else {
-                switchPoinTab('input');
+    async function editPoin(id) {
+        const p = (db.poin || []).find(x => x.RecordID === id); if (!p) return;
+        const n = (Number(p.PoinReward) || 0) - (Number(p.PoinPelanggaran) || 0);
+        const nm = db.students.find(s => String(s.StudentID) === String(p.StudentID))?.StudentName || '-';
+        const r = await Swal.fire({
+            title: 'Ubah catatan poin',
+            html: `<div class="text-start"><p class="fw-bold mb-2">${escapeHtml(nm)}</p>
+                <label class="form-label small fw-bold mb-1" for="ep-tgl">Tanggal</label><input type="date" id="ep-tgl" class="form-control mb-2" value="${escapeHtml(p.Tanggal || '')}">
+                <label class="form-label small fw-bold mb-1" for="ep-ket">Keterangan</label><input type="text" id="ep-ket" class="form-control mb-2" value="${escapeHtml(p.Keterangan || '')}">
+                <label class="form-label small fw-bold mb-1" for="ep-poin">Poin (pakai minus untuk pelanggaran)</label><input type="number" id="ep-poin" class="form-control" value="${n}"></div>`,
+            showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Batal',
+            preConfirm: () => {
+                const v = parseInt(document.getElementById('ep-poin').value, 10);
+                if (!v) { Swal.showValidationMessage('Poin tidak boleh 0.'); return false; }
+                return { tgl: document.getElementById('ep-tgl').value, ket: document.getElementById('ep-ket').value.trim(), v };
             }
         });
+        if (!r.isConfirmed) return;
+        p.Tanggal = r.value.tgl; p.Keterangan = r.value.ket; p.PoinReward = r.value.v > 0 ? r.value.v : 0; p.PoinPelanggaran = r.value.v < 0 ? -r.value.v : 0;
+        syncDB(); loadPoinData(); renderPoinInput();
     }
-
-    function editPoin(id) {
-        const p = db.poin.find(x => x.RecordID === id);
-        if (!p) return;
-        editingPoinId = id;
-
-        document.getElementById('poin-kelas').value = p.ClassID;
-        populatePoinStudentSelect();
-        document.getElementById('poin-siswa').value = p.StudentID;
-        document.getElementById('poin-tanggal').value = p.Tanggal || '';
-        document.getElementById('poin-reward').value = p.PoinReward;
-        document.getElementById('poin-pelanggaran').value = p.PoinPelanggaran;
-        document.getElementById('poin-keterangan').value = p.Keterangan || '';
-        
-        document.getElementById('btn-save-poin').innerHTML = '<i class="bi bi-save me-1"></i> Update Poin';
-        document.getElementById('btn-cancel-edit-poin').style.display = 'block';
-
-        // Pindah otomatis ke tampilan form input
-        switchPoinTab('input');
-
-        const titleElem = document.getElementById('poin-form-title');
-        if (titleElem) {
-            titleElem.innerHTML = '<i class="bi bi-pencil-square text-warning"></i> Edit Catatan Poin Siswa';
-        }
-
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function cancelEditPoin() {
-        editingPoinId = null;
-        document.getElementById('btn-save-poin').innerHTML = '<i class="bi bi-save me-1"></i> Simpan Data Poin';
-        document.getElementById('btn-cancel-edit-poin').style.display = 'none';
-        document.getElementById('poin-reward').value = 0;
-        document.getElementById('poin-pelanggaran').value = 0;
-        document.getElementById('poin-keterangan').value = '';
-
-        const titleElem = document.getElementById('poin-form-title');
-        if (titleElem) {
-            titleElem.innerHTML = '<i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Poin Siswa';
-        }
-    }
-
+    function cancelEditPoin() { editingPoinId = null; }
     function deletePoin(id) {
-        Swal.fire({
-            title: 'Hapus Data Poin?', 
-            text: 'Catatan poin siswa ini akan dihapus secara permanen.', 
-            icon: 'warning',
-            showCancelButton: true, 
-            confirmButtonColor: '#C44747', 
-            confirmButtonText: 'Ya, Hapus!', 
-            cancelButtonText: 'Batal'
-        }).then((result) => {
-            if (result.isConfirmed) {
+        Swal.fire({ title: 'Hapus catatan poin?', text: 'Catatan poin siswa ini akan dihapus permanen.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#C44747', confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal' })
+            .then(result => {
+                if (!result.isConfirmed) return;
                 db.poin = db.poin.filter(p => p.RecordID !== id);
-                if (editingPoinId === id) cancelEditPoin();
-                syncDB(); 
-                loadPoinData();
-                updateQuickPoinSummary();
-                Swal.fire('Terhapus!', 'Data poin berhasil dihapus.', 'success');
-            }
-        });
+                syncDB(); loadPoinData(); renderPoinInput();
+                Swal.fire({ icon: 'success', title: 'Terhapus', timer: 1200, showConfirmButton: false });
+            });
     }
 
     function loadPoinData() {
@@ -7765,13 +8793,13 @@ window.AGENDA_GURU_LOADED = true;
         let phone = student.ParentPhone.replace(/\D/g, '');
         if (phone.startsWith('0')) phone = phone.replace(/^0/, '62');
 
-        let selectElem = document.getElementById('absen-bulan');
-        let month = selectElem.options[selectElem.selectedIndex].text;
+        const bulanKe = absenBulanAktif();
+        let month = AG_NAMA_BULAN[Number(bulanKe) - 1] || '';
 
-        // Hitung rekap
+        // Hitung rekap dari data bulan tersebut
         let tH = 0, tS = 0, tI = 0, tA = 0;
-        document.querySelectorAll(`.select-absen-val[data-sid="${sid}"]`).forEach(sel => {
-            let v = sel.value;
+        const rekapAbsen = absenBaca(absenCariRec(document.getElementById('absen-kelas').value, bulanKe));
+        (rekapAbsen.att[sid] || []).slice(0, rekapAbsen.dates.length).forEach(v => {
             if (v === 'H') tH++; else if (v === 'S') tS++; else if (v === 'I') tI++; else if (v === 'A') tA++;
         });
 
@@ -7800,11 +8828,24 @@ window.AGENDA_GURU_LOADED = true;
         let selJenis = document.getElementById('nilai-jenis');
         let jenis = selJenis.options[selJenis.selectedIndex].text;
 
-        let vals = [];
-        document.querySelectorAll(`.input-nilai-val[data-sid="${sid}"]`).forEach(inp => vals.push(inp.value || '-'));
+        const ctxWA = nilaiCtx();
+        let rincian = '';
+        if (ctxWA.jenis === 'Formatif') {
+            const daftar = nilaiDaftar(ctxWA), pos = nilaiCari(daftar), cur = pos >= 0 ? daftar[pos] : null;
+            const nums = [];
+            daftar.forEach(a => { const v = (nilaiBaca(nilaiRecHarian(ctxWA, a.m)).grades[sid] || [])[a.i]; if (agIsiNilai(v) && !isNaN(parseFloat(v))) nums.push(parseFloat(v)); });
+            if (cur) {
+                const v = (nilaiBaca(nilaiRecHarian(ctxWA, cur.m)).grades[sid] || [])[cur.i];
+                rincian += `*${cur.judul}*${cur.tgl ? ' (' + formatTanggalIndo(cur.tgl) + ')' : ''}\nNilai: *${agIsiNilai(v) ? v : '-'}*`;
+            }
+            if (nums.length) rincian += `\n\nRata-rata ${nums.length} penilaian harian semester ini: *${(nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1).replace('.', ',')}*`;
+        } else {
+            const v = (nilaiBaca(nilaiRecSumatif(ctxWA, false)).grades[sid] || [])[0];
+            rincian = `Nilai: *${agIsiNilai(v) ? v : '-'}*`;
+        }
 
         let guruName = db.config.userName || 'Guru Kelas';
-        let text = `Halo Bapak/Ibu Wali Murid dari *${student.StudentName}*,\n\nBerikut adalah hasil penilaian *${jenis}* untuk mata pelajaran *${mapel}*:\n\n*Nilai: ${vals.join(', ')}*\n\nTerima kasih atas bimbingan Bapak/Ibu di rumah,\n*${guruName}*`;
+        let text = `Halo Bapak/Ibu Wali Murid dari *${student.StudentName}*,\n\nBerikut adalah hasil *${jenis}* untuk mata pelajaran *${mapel}*:\n\n${rincian || 'Nilai: -'}\n\nTerima kasih atas bimbingan Bapak/Ibu di rumah,\n*${guruName}*`;
 
         // Perbaikan Bug
         let waUrl = 'https://api.whatsapp.com/send?phone=' + phone + '&text=' + encodeURIComponent(text);

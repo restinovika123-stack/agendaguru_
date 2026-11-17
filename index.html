@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgendaGuru - Manajemen Kelas Digital</title>
-    <script src="api.js?v=20261113194753"></script>
+    <script src="api.js?v=20261117020403"></script>
 
     <script>
         // Penangkap error global.
@@ -1052,6 +1052,417 @@
         #tur-kartu .tur-titik span.aktif { background: var(--teal-accent); width: 16px; border-radius: 3px; }
         #tur-kartu .tur-aksi { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
         #btn-tur-panduan { color: var(--primary-blue); padding: 2px 6px; }
+
+        /* ===== Input Absensi & Nilai: satu hari / satu penilaian, daftar ke bawah ===== */
+        .ag-tabs { display: inline-flex; gap: 4px; background: #E9EDF3; padding: 4px; border-radius: 12px; margin-bottom: 16px; max-width: 100%; }
+        .ag-tab { border: 0; background: transparent; padding: 9px 18px; border-radius: 9px; font-weight: 600; font-size: 0.9rem; color: #4A5468; min-height: 40px; }
+        .ag-tab.active { background: #FFFFFF; color: var(--navy-deep); font-weight: 700; box-shadow: 0 1px 3px rgba(23, 43, 77, .12); }
+        .ag-tab:focus-visible, .ag-btn:focus-visible, .ag-iconbtn:focus-visible, .ag-st:focus-visible, .ag-cell:focus-visible,
+        .ag-daftar-item:focus-visible, .ag-daftar-head:focus-visible, .ag-datehead:focus-visible, .ag-colhead:focus-visible { outline: 3px solid rgba(21, 154, 156, .45); outline-offset: 1px; }
+        .ag-panel { display: flex; flex-direction: column; gap: 14px; }
+        .ag-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 10px;
+            border: 1px solid #D5DBE5; background: #FFFFFF; color: var(--navy-deep); font-weight: 700; font-size: 0.875rem; cursor: pointer; white-space: nowrap; margin: 0; }
+        .ag-btn:hover { background: #F3F5F9; }
+        .ag-btn:disabled { opacity: .5; cursor: default; }
+        .ag-btn-primary { background: var(--navy-deep); border-color: var(--navy-deep); color: #FFFFFF; }
+        .ag-btn-primary:hover { background: var(--navy-secondary); }
+        .ag-btn-new { border: 2px dashed #8FCFD8; background: #F2FBFC; color: #0E6875; }
+        .ag-btn-new:hover { background: #E2F6F8; }
+        .ag-btn-outline-success { border: 2px solid var(--status-success); color: #17603F; }
+        .ag-btn-danger-outline { border-color: #F0CACA; color: #A33A3A; }
+        .ag-btn-danger-outline:hover { background: #FDECEC; }
+        .ag-iconbtn { width: 44px; height: 44px; flex: 0 0 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px;
+            border: 1px solid #D5DBE5; background: #FFFFFF; color: var(--navy-deep); font-size: 1.1rem; padding: 0; }
+        .ag-iconbtn:hover { background: #F3F5F9; }
+        .ag-iconbtn:disabled { opacity: .35; cursor: default; }
+        .ag-wa { border-color: #CFE7DA; color: var(--status-success); }
+        .ag-linkbtn { border: 0; background: none; padding: 6px 4px; font-weight: 700; font-size: 0.8125rem; text-decoration: underline; color: var(--navy-deep); }
+        .ag-linkbtn.ag-danger { color: #A33A3A; }
+
+        .ag-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .ag-nav-mid { flex: 1 1 300px; min-width: 0; text-align: center; }
+        .ag-nav-left { text-align: left; }
+        .ag-nav-title { font-size: 1.15rem; font-weight: 800; color: var(--navy-deep); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ag-nav-sub { font-size: 0.78rem; font-weight: 700; color: #5B6578; }
+        .ag-tag-today { color: #0E7C8C; }
+        .ag-tag-warn { color: #8A5A0F; }
+        .ag-nav-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+        .ag-datepick { position: relative; overflow: hidden; }
+        .ag-datepick input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+
+        .ag-sum4, .ag-sum3 { display: grid; gap: 10px; }
+        .ag-sum4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .ag-sum3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .ag-sumbox { background: #F3F5F9; border-radius: 12px; padding: 10px 14px; color: var(--navy-deep); min-width: 0; }
+        .ag-sumbox b { display: block; font-size: 1.35rem; font-weight: 800; line-height: 1.2; }
+        .ag-sumbox span { font-size: 0.8rem; font-weight: 600; }
+        .ag-sumbox.st-H { background: #E3F4EC; color: #17603F; }
+        .ag-sumbox.st-S { background: #E4ECF7; color: #234A75; }
+        .ag-sumbox.st-I { background: #FBF0DC; color: #6E470D; }
+        .ag-sumbox.st-A { background: #FBE6E6; color: #8F2E2E; }
+
+        .ag-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-radius: 12px; padding: 10px 14px; font-size: 0.875rem; }
+        .ag-banner > span { flex: 1 1 260px; }
+        .ag-banner > i { font-size: 1.2rem; }
+        .ag-banner-ok { background: #EEF8F2; color: #17603F; }
+        .ag-banner-warn { background: #FFF6E5; color: #6E470D; border: 1px solid #F3DDAE; }
+
+        .ag-toolbar, .ag-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .ag-search { flex: 1 1 220px; display: flex; align-items: center; gap: 8px; min-height: 44px; border: 1px solid #D5DBE5; border-radius: 10px; padding: 0 12px; color: #5B6578; margin: 0; background: #FFFFFF; }
+        .ag-search input { border: 0; outline: none; flex: 1; min-width: 0; font-size: 0.9rem; background: transparent; color: var(--navy-deep); }
+        .ag-hint { flex: 1 1 260px; font-size: 0.8125rem; color: #5B6578; }
+        .ag-hint kbd { background: #FFFFFF; color: var(--navy-deep); border: 1px solid #C9D1DD; font-weight: 700; font-size: 0.75rem; }
+        .ag-fill { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; font-weight: 600; color: #4A5468; margin: 0; }
+
+        .ag-list { display: flex; flex-direction: column; border-top: 1px solid #EEF1F5; }
+        .ag-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid #EEF1F5; }
+        .ag-row[hidden] { display: none; }
+        .ag-row-mark { background: #FAFBFD; }
+        .ag-no { width: 24px; flex: 0 0 24px; text-align: right; font-size: 0.8rem; color: #6B7488; }
+        .ag-name { flex: 1 1 180px; min-width: 0; font-weight: 700; font-size: 0.95rem; color: var(--navy-deep); margin: 0; overflow-wrap: anywhere; }
+        .ag-seg { display: flex; gap: 6px; flex: 0 0 auto; }
+        .ag-st { min-width: 72px; height: 44px; border-radius: 10px; border: 2px solid #E1E6EE; background: #FFFFFF; color: #5B6578; font-weight: 700; font-size: 0.875rem; padding: 0 8px; }
+        .ag-st:hover { border-color: #C3CBD8; }
+        .ag-st-short { display: none; }
+        .ag-st.on.st-H { background: #E3F4EC; color: #17603F; border-color: var(--status-success); }
+        .ag-st.on.st-S { background: #E4ECF7; color: #234A75; border-color: var(--status-info); }
+        .ag-st.on.st-I { background: #FBF0DC; color: #6E470D; border-color: var(--status-warning); }
+        .ag-st.on.st-A { background: #FBE6E6; color: #8F2E2E; border-color: var(--status-danger); }
+
+        .ag-numin { width: 88px; height: 44px; border: 2px solid #D5DBE5; border-radius: 10px; text-align: center; font-size: 1.05rem; font-weight: 700; color: var(--navy-deep); background: #FFFFFF; flex: 0 0 auto; }
+        .ag-numin:focus { outline: none; border-color: var(--teal-accent); box-shadow: 0 0 0 3px rgba(21, 154, 156, .2); }
+        .ag-numin.is-tuntas { border-color: #9CCFB6; }
+        .ag-numin.is-rendah { border-color: var(--status-danger); color: #A33A3A; }
+        .ag-numin-sm { width: 64px; height: 40px; font-size: 0.9rem; }
+        .ag-badge { display: inline-flex; justify-content: center; padding: 5px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+        .ag-badge-lg { min-width: 112px; }
+        .ag-badge-sm { display: none; }
+        .b-kosong { background: #F1F3F7; color: #5B6578; }
+        .b-tuntas { background: #E3F4EC; color: #17603F; }
+        .b-rendah { background: #FBE6E6; color: #8F2E2E; }
+
+        .ag-newform, .ag-detail { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; border-radius: 12px; padding: 14px; }
+        .ag-newform { border: 1px solid #BFE6EC; background: #F2FBFC; }
+        .ag-detail { background: #F7F9FC; border: 1px solid #E3E8F0; margin-top: 8px; }
+        .ag-detailbox > summary { cursor: pointer; font-size: 0.85rem; font-weight: 700; color: #4A5468; min-height: 36px; display: flex; align-items: center; gap: 6px; }
+        .ag-detailbox > summary::marker { color: #8A93A5; }
+        .ag-newform-title { flex: 1 1 100%; font-weight: 700; color: var(--navy-deep); font-size: 0.9rem; }
+        .ag-newform label, .ag-detail label { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; font-weight: 700; color: #4A5468; margin: 0; }
+        .ag-newform input, .ag-detail input { height: 44px; border: 1px solid #D5DBE5; border-radius: 10px; padding: 0 12px; font-size: 0.9rem; color: var(--navy-deep); background: #FFFFFF; }
+        .ag-grow { flex: 1 1 240px; }
+
+        .ag-daftar { border: 1px solid #E3E8F0; border-radius: 12px; max-height: 360px; overflow-y: auto; }
+        .ag-daftar-head { width: 100%; display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding: 0 14px; background: #F3F5F9; border: 0;
+            border-bottom: 1px solid #E3E8F0; font-weight: 800; font-size: 0.8rem; letter-spacing: 1px; color: var(--navy-deep); position: sticky; top: 0; z-index: 1; }
+        .ag-daftar-count { font-weight: 600; letter-spacing: 0; color: #5B6578; }
+        .ag-daftar-item { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 14px; border: 0; border-bottom: 1px solid #EEF1F5;
+            background: #FFFFFF; text-align: left; color: var(--navy-deep); font-size: 0.875rem; }
+        .ag-daftar-item:hover { background: #F7F9FC; }
+        .ag-daftar-item.on { background: #EAF1FA; box-shadow: inset 3px 0 0 var(--primary-blue); }
+        .ag-daftar-tgl { width: 60px; flex: 0 0 60px; font-size: 0.8rem; font-weight: 700; color: #5B6578; }
+        .ag-daftar-materi { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ag-daftar-prog { font-size: 0.75rem; font-weight: 700; color: #8A5A0F; }
+        .ag-daftar-prog.ok { color: #17603F; }
+
+        .ag-empty { text-align: center; padding: 28px 12px; color: #5B6578; }
+        .ag-empty > i { font-size: 2rem; display: block; margin-bottom: 6px; }
+
+        .ag-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 0.8125rem; color: #4A5468; }
+        .ag-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+        .ag-legend-note { margin-left: auto; color: #5B6578; }
+        .ag-cellmini { display: inline-flex; width: 22px; height: 22px; border-radius: 6px; align-items: center; justify-content: center; font-weight: 800; font-size: 0.7rem; border: 1px solid transparent; }
+        .ag-tablewrap { overflow: auto; max-height: 65vh; border: 1px solid #E3E8F0; border-radius: 12px; -webkit-overflow-scrolling: touch; }
+        .ag-table { border-collapse: separate; border-spacing: 0; font-size: 0.85rem; min-width: 100%; }
+        .ag-table th, .ag-table td { border-bottom: 1px solid #EEF1F5; padding: 4px; text-align: center; background: #FFFFFF; }
+        .ag-table thead th { position: sticky; top: 0; z-index: 2; background: #EEF2F7; border-bottom: 1px solid #DDE3EC; vertical-align: top; }
+        .ag-table .ag-stick-l { position: sticky; left: 0; z-index: 1; text-align: left; padding: 8px 12px; min-width: 170px; max-width: 230px; border-right: 1px solid #DDE3EC; font-weight: 700; color: var(--navy-deep); }
+        .ag-table .ag-stick-r { position: sticky; right: 0; z-index: 1; border-left: 1px solid #DDE3EC; padding: 8px 12px; white-space: nowrap; }
+        .ag-table thead .ag-stick-l, .ag-table thead .ag-stick-r { z-index: 3; background: #EEF2F7; vertical-align: middle; }
+        .ag-datehead, .ag-colhead { border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; line-height: 1.2; color: var(--navy-deep); padding: 4px 6px; border-radius: 8px; width: 100%; }
+        .ag-datehead:hover, .ag-colhead:hover { background: #DDE5F0; }
+        .ag-datehead small, .ag-colhead small { font-size: 0.7rem; color: #5B6578; font-weight: 600; }
+        .ag-datehead b { font-size: 0.95rem; }
+        .ag-colhead { align-items: flex-start; text-align: left; min-width: 110px; max-width: 160px; }
+        .ag-colhead b { font-size: 0.8rem; white-space: normal; }
+        .ag-dateinput { width: 120px; font-size: 0.75rem; border: 1px dashed #9AA3B5; border-radius: 6px; padding: 2px 4px; }
+        .ag-cell { width: 36px; height: 36px; border-radius: 8px; border: 0; font-weight: 800; font-size: 0.8rem; }
+        .st-H.ag-cell, .ag-cellmini.st-H { background: #E3F4EC; color: #17603F; }
+        .st-S.ag-cell, .ag-cellmini.st-S { background: #E4ECF7; color: #234A75; }
+        .st-I.ag-cell, .ag-cellmini.st-I { background: #FBF0DC; color: #6E470D; }
+        .st-A.ag-cell, .ag-cellmini.st-A { background: #FBE6E6; color: #8F2E2E; }
+        .st-kosong.ag-cell, .ag-cellmini.st-kosong, .ag-cellval.st-kosong { background: #F3F5F9; color: #6B7488; border: 1px dashed #B5BCC9; }
+        .ag-cellmini.b-rendah { border-color: var(--status-danger); }
+        .ag-cellval { display: inline-flex; min-width: 48px; height: 32px; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; border: 1px solid #E1E6EE; }
+        .ag-cellval.b-rendah { border-color: var(--status-danger); }
+        .ag-namecell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .ag-wa-mini { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 8px; border: 1px solid #CFE7DA; background: #FFFFFF; color: var(--status-success); padding: 0; }
+        .ag-total { font-weight: 700; }
+        .t-H { color: #17603F; } .t-S { color: #234A75; } .t-I { color: #6E470D; } .t-A { color: #A33A3A; }
+
+        @media (max-width: 767.98px) {
+            .ag-tabs { display: flex; }
+            .ag-tab { flex: 1; padding: 9px 8px; }
+            .ag-nav-mid { flex: 1 1 0; }
+            .ag-nav-tools { width: 100%; }
+            .ag-nav-tools .ag-btn { flex: 1; }
+            .ag-datepick span { display: none; }
+            .ag-legend-note { margin-left: 0; }
+        }
+        @media (max-width: 576px) {
+            .ag-sum4 { gap: 6px; }
+            .ag-sumbox { padding: 8px; text-align: center; }
+            .ag-sumbox b { font-size: 1.1rem; }
+            .ag-sumbox span { font-size: 0.7rem; }
+            .ag-sum3 .ag-sumbox b { font-size: 1rem; }
+            .ag-row { gap: 8px; padding: 8px 0; }
+            .ag-no { display: none; }
+            .ag-name { font-size: 0.875rem; flex-basis: 100px; }
+            .ag-seg { gap: 4px; }
+            .ag-st { min-width: 44px; width: 44px; padding: 0; font-size: 0.95rem; font-weight: 800; }
+            .ag-st-full { display: none; }
+            .ag-st-short { display: inline; }
+            .ag-wa { width: 36px; height: 36px; flex-basis: 36px; font-size: 0.95rem; }
+            #view-absensi .ag-wa { display: none; }
+            .ag-badge-lg { display: none; }
+            .ag-badge-sm { display: table; margin-top: 3px; padding: 2px 8px; font-size: 0.7rem; }
+            .ag-numin { width: 76px; height: 48px; font-size: 1.15rem; }
+            .ag-nav-title { font-size: 1rem; }
+            .ag-hint { display: none; }
+        }
+
+        /* ===== Ekstrakurikuler, Poin Siswa, Kokurikuler: pola daftar ke bawah ===== */
+        .ag-viewhead { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+        .ag-viewtitle { font-weight: 800; color: var(--navy-deep); margin: 0 0 4px; letter-spacing: -0.3px; }
+        .ag-viewsub { color: #5B6578; font-size: 0.875rem; margin: 0; max-width: 560px; }
+        .ag-viewfilters { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+        .ag-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; font-weight: 700; color: #4A5468; margin: 0; }
+        .ag-field .form-select, .ag-field .form-control { min-height: 44px; min-width: 150px; }
+        .ag-tpchip { min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border-radius: 10px; background: #E9EDF3; color: var(--navy-deep); font-size: 0.875rem; font-weight: 600; }
+        .ag-steptitle { font-size: 0.8125rem; font-weight: 800; color: #5B6578; }
+        .ag-steptitle-note { color: #0E6875; }
+        .ag-panel > .ag-search { flex: 0 0 auto; }
+        .ag-steprow { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .ag-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+        .ag-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 999px; border: 2px solid #E1E6EE; background: #FFFFFF;
+            color: var(--navy-deep); font-weight: 700; font-size: 0.875rem; }
+        .ag-chip:hover { border-color: #C3CBD8; }
+        .ag-chip.on { border-color: var(--navy-deep); background: #EEF2F8; }
+        .ag-chip small { font-weight: 600; color: #5B6578; font-size: 0.75rem; }
+        .ag-chip-new { border-style: dashed; border-color: #8FCFD8; background: #F2FBFC; color: #0E6875; }
+        .ag-chip-dash { border-style: dashed; border-color: #9AA3B5; color: #4A5468; }
+        .ag-chip-dim.on { border-color: #0E6875; background: #E2F6F8; color: #0B5560; }
+        .ag-sum5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        .ag-sumbox.st-H, .ag-sumbox.st-S, .ag-sumbox.st-I, .ag-sumbox.st-A { text-align: left; }
+        .ag-btn-outline-info { border: 2px solid var(--primary-blue); color: #234A75; }
+        .ag-btn-accent { background: #4FD1E0; border-color: #4FD1E0; color: var(--navy-deep); }
+        .ag-btn-accent:hover { background: #3BC2D2; }
+        .ag-btn-accent.is-off { background: #C9D1DD; border-color: #C9D1DD; }
+        .ag-saved { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; font-weight: 600; color: #17603F; }
+        .ag-row-col { flex-direction: column; align-items: stretch; gap: 6px; }
+        .ag-row-main { display: flex; align-items: center; gap: 10px; }
+        .ag-row-off { background: #FAFBFD; }
+        .ag-row-off .ag-name { color: #6B7488; }
+        .ag-st-off.on { background: #F1F3F7; color: #4A5468; border-color: #9AA3B5; }
+        .ag-st-wide { min-width: 104px; }
+        .ag-note { display: flex; align-items: flex-start; gap: 8px; padding-left: 34px; font-size: 0.8125rem; line-height: 1.5; color: #4A5468; }
+        .ag-note > span { flex: 1; min-width: 0; }
+        .ag-note textarea { flex: 1; min-width: 0; border: 1px solid #D5DBE5; border-radius: 10px; padding: 8px 10px; font-size: 0.875rem; color: var(--navy-deep); }
+        .ag-note-muted { color: #8A93A5; }
+        .ag-split { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+        .ag-split-main { flex: 999 1 520px; min-width: 0; }
+        .ag-split-side { flex: 1 1 260px; min-width: 0; }
+        .ag-jenis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .ag-jenis-btn { min-height: 52px; border-radius: 12px; border: 2px solid #E1E6EE; background: #FFFFFF; color: #5B6578; font-weight: 800; font-size: 0.95rem; }
+        .ag-jenis-btn.neg.on { border-color: var(--status-danger); background: #FBE6E6; color: #8F2E2E; }
+        .ag-jenis-btn.pos.on { border-color: var(--status-success); background: #E3F4EC; color: #17603F; }
+        .ag-checkgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .ag-checkrow { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 12px; border-radius: 12px; border: 2px solid #E1E6EE; background: #FFFFFF; color: var(--navy-deep); text-align: left; }
+        .ag-checkrow[hidden] { display: none; }
+        .ag-checkrow.on { border-color: #0E6875; background: #F2FBFC; }
+        .ag-checkbox { width: 22px; height: 22px; flex: 0 0 22px; border-radius: 6px; border: 2px solid #9AA3B5; display: flex; align-items: center; justify-content: center; color: transparent; font-size: 0.9rem; }
+        .ag-checkrow.on .ag-checkbox { background: #0E6875; border-color: #0E6875; color: #FFFFFF; }
+        .ag-checkname { flex: 1; min-width: 0; font-weight: 700; font-size: 0.875rem; }
+        .ag-savebar { position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--navy-deep); color: #FFFFFF; border-radius: 14px; padding: 10px 14px; }
+        .ag-savebar > span { flex: 1 1 220px; font-size: 0.875rem; font-weight: 600; }
+        .ag-recent { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #EEF1F5; }
+        .ag-recent-pt { min-width: 40px; text-align: center; padding: 4px 6px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; }
+        .ag-recent-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 0.875rem; }
+        .ag-recent-txt small { color: #5B6578; font-size: 0.75rem; }
+        .ag-iconbtn-sm { width: 36px; height: 36px; flex-basis: 36px; font-size: 0.85rem; }
+        .ag-pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+        .ag-pcard { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; border-radius: 12px; border: 2px solid #E1E6EE; background: #FFFFFF; color: var(--navy-deep); text-align: left; min-height: 76px; }
+        .ag-pcard small { font-size: 0.75rem; font-weight: 700; color: #5B6578; }
+        .ag-pcard b { font-size: 0.95rem; }
+        .ag-pcard span { font-size: 0.75rem; font-weight: 700; }
+        .ag-pcard.on { border-color: var(--navy-deep); background: #EEF2F8; }
+        .ag-pcard-new { align-items: center; justify-content: center; flex-direction: row; gap: 8px; border-style: dashed; border-color: #8FCFD8; background: #F2FBFC; color: #0E6875; font-weight: 700; }
+        .ag-pcard-new.on { border-style: solid; }
+        .ag-stephead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .ag-stephead h5 { margin: 0; flex: 1; font-weight: 800; color: var(--navy-deep); font-size: 1.05rem; }
+        .ag-stephead h5 small { font-size: 0.85rem; color: #5B6578; font-weight: 700; }
+        .ag-stepnum { width: 28px; height: 28px; border-radius: 999px; background: var(--navy-deep); color: #FFFFFF; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.875rem; }
+        .ag-formgrid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+        .ag-span2 { grid-column: span 1; }
+        @media (max-width: 767.98px) {
+            .ag-viewfilters { width: 100%; }
+            .ag-viewfilters .ag-field { flex: 1 1 140px; }
+            .ag-sum5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .ag-formgrid { grid-template-columns: 1fr 1fr; }
+            .ag-formgrid .ag-span2 { grid-column: span 2; }
+            .ag-checkgrid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 576px) {
+            .ag-row-col .ag-row-main { flex-wrap: wrap; }
+            .ag-row-col .ag-name { flex-basis: 100%; }
+            .ag-row-col .ag-seg { width: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .ag-row-col .ag-seg5 { grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr)); }
+            .ag-row-col .ag-st { width: auto; min-width: 0; }
+            .ag-note { padding-left: 0; }
+            .ag-sum5 .ag-sumbox span { font-size: 0.68rem; }
+        }
+
+        /* ===== Jurnal Harian, Jadwal Pelajaran, Manajemen Kelas ===== */
+        .ag-btn-wa { border-color: #CFE7DA; color: #17603F; }
+        .ag-checkline { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: #4A5468; font-weight: 600; margin: 0; }
+        .ag-checkline input { width: 18px; height: 18px; }
+        /* Jadwal */
+        .ag-jaminfo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: #F2FBFC; border: 1px solid #D3EEF2; font-size: 0.8125rem; color: #24485A; }
+        .ag-jaminfo > span { flex: 1 1 280px; }
+        .ag-jaminfo > i { color: #0E6875; font-size: 1.1rem; }
+        .ag-week { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+        .ag-daycol { background: #FFFFFF; border: 2px solid #E3E8F0; border-radius: 14px; display: flex; flex-direction: column; min-width: 0; }
+        .ag-daycol.today { border-color: #0E6875; }
+        .ag-dayhead { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 10px 12px; background: #F7F9FC; border-radius: 12px 12px 0 0; border-bottom: 1px solid #EEF1F5; }
+        .ag-daycol.today .ag-dayhead { background: #E2F6F8; color: #0B5560; }
+        .ag-dayhead b { font-size: 0.9rem; }
+        .ag-dayhead span { font-size: 0.7rem; font-weight: 700; color: #5B6578; }
+        .ag-daybody { display: flex; flex-direction: column; gap: 6px; padding: 8px; flex: 1; }
+        .ag-lesson { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; border: 0; border-radius: 10px; padding: 8px 10px; text-align: left; color: var(--navy-deep); min-height: 44px; }
+        .ag-lesson small { font-size: 0.7rem; font-weight: 700; color: #4A5468; }
+        .ag-lesson b { font-size: 0.85rem; }
+        .ag-lesson:hover { filter: brightness(0.97); }
+        .ag-lesson-guru { font-weight: 600 !important; color: #24485A !important; }
+        .ag-addform input[type="text"] { min-height: 40px; border: 1px solid #D5DBE5; border-radius: 8px; font-size: 0.8rem; padding: 0 8px; background: #FFFFFF; }
+        .ag-dayempty { font-size: 0.8rem; color: #8A93A5; text-align: center; margin: 8px 0; }
+        .ag-addform { display: flex; flex-direction: column; gap: 6px; border: 1px solid #BFE6EC; background: #F2FBFC; border-radius: 10px; padding: 8px; }
+        .ag-addform label { display: flex; flex-direction: column; gap: 3px; font-size: 0.7rem; font-weight: 700; color: #4A5468; margin: 0; }
+        .ag-addform select { min-height: 40px; border: 1px solid #D5DBE5; border-radius: 8px; font-size: 0.8rem; padding: 0 6px; background: #FFFFFF; }
+        .ag-addform .ag-checkline { flex-direction: row; font-size: 0.72rem; }
+        .ag-addbtn { margin-top: auto; min-height: 40px; border-radius: 10px; border: 2px dashed #C9D1DD; background: #FFFFFF; color: #4A5468; font-weight: 700; font-size: 0.8rem; }
+        .ag-daytabs { display: none; }
+        /* Jurnal */
+        .ag-slotgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .ag-slot { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 8px 12px; border-radius: 12px; border: 2px solid #E1E6EE; background: #FFFFFF; color: var(--navy-deep); text-align: left; }
+        .ag-slot.on { border-color: var(--navy-deep); background: #EEF2F8; }
+        .ag-slot-time { font-size: 0.75rem; font-weight: 800; color: #5B6578; min-width: 82px; }
+        .ag-slot-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+        .ag-slot-main b { font-size: 0.875rem; }
+        .ag-slot-main small { font-size: 0.75rem; color: #5B6578; }
+        .ag-weekday { width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 8px 6px; border: 0; border-top: 1px solid #EEF1F5; background: transparent; text-align: left; color: var(--navy-deep); border-radius: 8px; }
+        .ag-weekday.on { background: #EEF2F8; }
+        .ag-weekday-head { display: flex; justify-content: space-between; gap: 6px; font-size: 0.8125rem; }
+        .ag-weekday-head span { font-size: 0.75rem; font-weight: 700; }
+        .ag-weekday small { font-size: 0.75rem; color: #4A5468; }
+        .ag-formtitle { margin: 0; font-weight: 800; font-size: 1rem; color: var(--navy-deep); }
+        .ag-formgrid-2 { grid-template-columns: 1fr 2fr; }
+        .ag-chips-sm .ag-chip { min-height: 36px; font-size: 0.8rem; font-weight: 600; padding: 0 12px; background: #F7F9FC; border-width: 1px; }
+        .ag-jurnal-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .ag-filebtn { position: relative; overflow: hidden; }
+        .ag-filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        /* Manajemen Kelas */
+        .ag-classgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+        .ag-classcard b { font-size: 1.05rem; }
+        .ag-studentrow { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #EEF1F5; }
+        .ag-studentrow.on { background: #EEF2F8; box-shadow: inset 3px 0 0 var(--primary-blue); }
+        .ag-studentrow .chk-std { width: 22px; height: 22px; margin: 0 0 0 8px; flex: 0 0 auto; }
+        .ag-studentbtn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 10px; border: 0; background: transparent; color: var(--navy-deep); text-align: left; }
+        .ag-avatar { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem; }
+        .ag-avatar.l { background: #E4ECF7; color: #234A75; }
+        .ag-avatar.p { background: #FBE6EF; color: #8F2E5A; }
+        .ag-avatar.lg { width: 52px; height: 52px; flex-basis: 52px; font-size: 1.05rem; }
+        .ag-studentmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+        .ag-studentmain b { font-size: 0.95rem; }
+        .ag-studentmain small, .ag-studentortu small { font-size: 0.75rem; color: #5B6578; }
+        .ag-studentortu { width: 200px; display: flex; flex-direction: column; font-size: 0.8125rem; color: #4A5468; }
+        .ag-studentortu small { color: #17603F; }
+        .ag-chev { color: #9AA3B5; }
+        .ag-detailpanel { flex: 1 1 300px; min-width: 0; position: sticky; top: 12px; }
+        .ag-detailhead { display: flex; align-items: center; gap: 12px; }
+        .ag-detailhead b { display: block; font-size: 1.05rem; color: var(--navy-deep); }
+        .ag-detailhead small { color: #5B6578; font-size: 0.8125rem; }
+        .ag-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 0.8125rem; margin: 0; }
+        .ag-dl dt { color: #5B6578; font-weight: 600; }
+        .ag-dl dd { margin: 0; font-weight: 700; color: var(--navy-deep); overflow-wrap: anywhere; }
+        .ag-btngrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .ag-sum3-mini .ag-sumbox { text-align: center; padding: 8px; }
+        .ag-sum3-mini .ag-sumbox b { font-size: 1.05rem; }
+        @media (max-width: 1199.98px) {
+            .ag-week { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .ag-studentortu { display: none; }
+        }
+        @media (max-width: 991.98px) {
+            .ag-detailpanel { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 1045; max-height: 85vh; overflow-y: auto; transform: translateY(105%); transition: transform .2s ease; box-shadow: 0 -8px 30px rgba(23, 43, 77, .25); border-radius: 18px 18px 0 0; }
+            .ag-detailpanel.open { transform: none; }
+            .ag-detailpanel .card-custom { margin: 0; border-radius: 18px 18px 0 0; }
+            .ag-detail-empty { display: none; }
+        }
+        @media (max-width: 767.98px) {
+            .ag-daytabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px; }
+            .ag-daytab { min-height: 44px; border-radius: 10px; border: 1px solid #D5DBE5; background: #FFFFFF; font-weight: 800; font-size: 0.85rem; color: #4A5468; }
+            .ag-daytab.on { background: var(--navy-deep); border-color: var(--navy-deep); color: #FFFFFF; }
+            .ag-week { grid-template-columns: 1fr; }
+            .ag-daycol:not(.sel) { display: none; }
+            .ag-lesson { min-height: 56px; }
+            .ag-slotgrid { grid-template-columns: 1fr; }
+            .ag-formgrid-2 { grid-template-columns: 1fr; }
+        }
+
+        /* ===== Cetak Rapor: kesiapan + pratinjau ===== */
+        .ag-setrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid #EEF1F5; }
+        .ag-setrow-title { font-size: 0.875rem; color: var(--navy-deep); margin-right: 4px; }
+        .b-warn { background: #FBF0DC; color: #6E470D; }
+        .ag-badge-xs { padding: 2px 8px; font-size: 0.7rem; }
+        .ag-chips-xs { gap: 4px; }
+        .ag-rapor-split { align-items: flex-start; }
+        .ag-rapor-list { flex: 1 1 400px; min-width: 0; }
+        .ag-rapor-preview { flex: 1.5 1 560px; min-width: 0; }
+        .ag-rapor-sum { font-size: 1rem; color: var(--navy-deep); }
+        .ag-progress { height: 8px; border-radius: 999px; background: #EEF1F5; overflow: hidden; }
+        .ag-progress > div { height: 100%; background: var(--status-success); }
+        .ag-raporrow { border-bottom: 1px solid #EEF1F5; }
+        .ag-raporrow.on { background: #EEF2F8; box-shadow: inset 3px 0 0 var(--primary-blue); }
+        .ag-raporbtn { width: 100%; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 0; background: transparent; text-align: left; color: var(--navy-deep); min-height: 56px; }
+        .ag-raporrow-head { display: flex; justify-content: space-between; gap: 8px; font-size: 0.9rem; }
+        .ag-raporrow-head span { font-size: 0.75rem; font-weight: 800; }
+        .ag-raporedit { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+        .ag-btn-pdf { background: #C44747; border-color: #C44747; color: #FFFFFF; }
+        .ag-btn-pdf:hover { background: #A93A3A; }
+        .ag-rapor-paper { background: #E9EDF3; border-radius: 12px; padding: 14px; overflow-x: auto; }
+        .ag-rapor-lihat { display: none; }
+        .ag-hp-only { display: none !important; }
+        @media (max-width: 767.98px) {
+            .ag-rapor-paper { display: none; }
+            .ag-rapor-paper.show { display: block; }
+            .ag-rapor-lihat { display: inline-flex; }
+            .ag-hp-only { display: grid !important; }
+            .ag-setrow .ag-btn { flex: 1 1 auto; }
+        }
+        @media print { .ag-rapor-paper { background: none; padding: 0; } }
+
+        /* ===== Jenjang sekolah & format rapor ===== */
+        .ag-jenjanggrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        .ag-jenjanggrid .ag-pcard .ag-badge { margin-top: 4px; white-space: normal; text-align: left; line-height: 1.3; }
+        .ag-radiocard { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; border: 2px solid #E1E6EE; background: #FFFFFF; cursor: pointer; margin: 0; }
+        .ag-radiocard.on { border-color: var(--navy-deep); background: #EEF2F8; }
+        .ag-radiocard input { width: 20px; height: 20px; margin-top: 2px; flex: 0 0 auto; }
+        .ag-radiocard b { display: block; color: var(--navy-deep); font-size: 0.9rem; }
+        .ag-radiocard small { color: #5B6578; font-size: 0.8rem; }
+        .ag-faserow { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #EEF1F5; flex-wrap: wrap; }
+        .ag-faserow b { flex: 1 1 140px; font-size: 0.9rem; color: var(--navy-deep); }
+        .ag-faserow small { color: #5B6578; font-size: 0.75rem; }
+        .ag-faserow .form-select { width: 190px; min-height: 40px; }
+        .rapor-panduan { font-family: Arial, Helvetica, sans-serif; }
+        @media (max-width: 991.98px) { .ag-jenjanggrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     </style>
 </head>
 
@@ -1370,85 +1781,18 @@
             </div>
 
             <div id="view-kelas" class="view-section">
-                <!-- Header Manajemen Kelas dengan Navigasi Tab Internal -->
-                <div class="card-custom mb-4">
-                    <div class="card-body p-3 p-md-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-                        <div>
-                            <h4 class="fw-bold mb-1" style="color: var(--navy-deep); letter-spacing: -0.3px;">Manajemen Kelas</h4>
-                            <p class="text-muted small mb-0">Kelola data kelas, daftar siswa, dan mata pelajaran sekolah secara terstruktur.</p>
+                <div class="card-custom mb-3">
+                    <div class="card-body">
+                        <div class="ag-viewhead">
+                            <div><h4 class="ag-viewtitle">Manajemen Kelas</h4><p class="ag-viewsub">Pilih kelas, lalu ketuk nama siswa untuk melihat atau mengubah datanya.</p></div>
+                            
                         </div>
-                        <div class="d-flex align-items-center flex-wrap gap-2">
-                            <button type="button" class="btn btn-primary" id="btn-tab-kelas-siswa" onclick="switchKelasTab('siswa')">
-                                <i class="bi bi-people-fill me-1"></i> Data Siswa & Kelas
-                            </button>
-                            <button type="button" class="btn btn-outline-primary" id="btn-tab-kelas-mapel" onclick="switchKelasTab('mapel')">
-                                <i class="bi bi-book-half me-1"></i> Mata Pelajaran
-                            </button>
-                        </div>
+                        <div class="ag-tabs mb-0" role="tablist"><button type="button" role="tab" class="ag-tab active" id="btn-tab-kelas-siswa" onclick="switchKelasTab('siswa')">Kelas &amp; Siswa</button><button type="button" role="tab" class="ag-tab" id="btn-tab-kelas-mapel" onclick="switchKelasTab('mapel')">Mata Pelajaran</button></div>
                     </div>
                 </div>
-
-                <!-- Tampilan 1: Data Siswa & Kelas (Default) -->
                 <div id="kelas-subview-siswa">
-                    <div class="card-custom">
-                        <div class="card-header-custom">
-                            <h5 class="card-title-custom mb-2 mb-md-0"><i class="bi bi-people me-1" style="color: var(--primary-blue);"></i> Data Kelas & Siswa</h5>
-                            <div>
-                                <button class="btn btn-sm btn-outline-primary mb-1" onclick="showAddClassModal()"><i
-                                        class="bi bi-plus"></i> Kelas</button>
-                                <button class="btn btn-sm btn-success mb-1" onclick="showAddStudentModal()"><i
-                                        class="bi bi-person-plus"></i> Siswa</button>
-                                <button class="btn btn-sm btn-success mb-1" onclick="openBroadcastModal()"><i
-                                        class="bi bi-whatsapp"></i> Broadcast WA</button>
-                                <button class="btn btn-sm btn-orange mb-1" onclick="showUploadExcelModal()"><i
-                                        class="bi bi-upload"></i> Excel</button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="row mb-3 g-2 align-items-end">
-                                <div class="col-md-5 col-12 d-flex align-items-end gap-2">
-                                    <div class="flex-grow-1">
-                                        <label class="form-label">Pilih Kelas</label>
-                                        <select class="form-select" id="select-kelas-manajemen"
-                                            onchange="renderStudentsTable()">
-                                            <option value="">-- Pilih --</option>
-                                        </select>
-                                    </div>
-                                    <button class="btn btn-outline-danger mb-1" id="btn-hapus-kelas" onclick="deleteClass()"
-                                        style="display: none;" title="Hapus Kelas Ini"><i class="bi bi-trash"></i> Hapus
-                                        Kelas</button>
-                                </div>
-                                <div class="col-md-7 col-12 d-flex justify-content-md-end gap-2">
-                                    <div class="input-group" style="max-width: 280px;">
-                                        <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
-                                        <input type="text" class="form-control" id="search-student-manajemen" placeholder="Cari nama / NISN..." oninput="renderStudentsTable()">
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="table-responsive">
-                                <table class="table table-bordered table-hover align-middle">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th width="4%" class="text-center align-middle"><input type="checkbox"
-                                                    id="chk-all-stds" class="form-check-input"
-                                                    onchange="toggleAllStudents(this)"></th>
-                                            <th width="5%" class="text-center">No</th>
-                                            <th width="28%">Nama Lengkap Siswa</th>
-                                            <th width="18%">NIS / NISN</th>
-                                            <th width="8%" class="text-center">L/P</th>
-                                            <th width="22%">Orang Tua / Kontak</th>
-                                            <th width="15%" class="text-center">Aksi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="table-students-body">
-                                        <tr>
-                                            <td colspan="7" class="text-center text-muted py-4">Pilih kelas terlebih dahulu</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+                    <select id="select-kelas-manajemen" class="d-none" onchange="renderStudentsTable()" aria-hidden="true" tabindex="-1"><option value="">-- Pilih --</option></select>
+                    <div id="kelas-konten" class="ag-panel"></div>
                 </div>
 
                 <!-- Tampilan 3: Kelola Mata Pelajaran Guru -->
@@ -1518,11 +1862,11 @@
                 <div class="card-custom mb-3" style="overflow: visible !important; position: relative; z-index: 20;">
                     <div class="card-body row align-items-end">
                         <div class="col-md-3 col-6 mb-2">
-                            <label class="form-label mb-1">Kelas</label>
+                            <label class="form-label mb-1" for="absen-kelas">Kelas</label>
                             <select class="form-select" id="absen-kelas" onchange="loadAbsensiData()"></select>
                         </div>
-                        <div class="col-md-3 col-6 mb-2">
-                            <label class="form-label mb-1">Bulan</label>
+                        <div class="col-md-3 col-6 mb-2" id="absen-bulan-wrap" style="display:none;">
+                            <label class="form-label mb-1" for="absen-bulan">Bulan</label>
                             <select class="form-select" id="absen-bulan" onchange="loadAbsensiData()">
                                 <option value="07">Juli (Ganjil)</option>
                                 <option value="08">Agustus (Ganjil)</option>
@@ -1538,73 +1882,54 @@
                                 <option value="06">Juni (Genap)</option>
                             </select>
                         </div>
-                        <div class="col-md-6 col-12 text-md-end text-start mt-2">
-                            <button class="btn btn-info mb-1 text-white fw-bold me-1" onclick="addAbsenColumn()"><i
-                                    class="bi bi-plus-circle"></i> Tambah Kolom</button>
-                            <div class="dropdown d-inline-block me-1 mb-1">
+                        <div class="col mb-2 d-flex justify-content-md-end align-items-end">
+                            <div class="dropdown d-inline-block">
                                 <button class="btn btn-success dropdown-toggle" type="button"
-                                    data-bs-toggle="dropdown"><i class="bi bi-file-excel"></i> Excel</button>
-                                <ul class="dropdown-menu">
+                                    data-bs-toggle="dropdown"><i class="bi bi-file-excel"></i> Download Excel</button>
+                                <ul class="dropdown-menu dropdown-menu-end">
                                     <li><a class="dropdown-item" href="javascript:void(0)"
                                             onclick="downloadAbsenExcel('ganjil')">Semester Ganjil</a></li>
                                     <li><a class="dropdown-item" href="javascript:void(0)"
                                             onclick="downloadAbsenExcel('genap')">Semester Genap</a></li>
                                 </ul>
                             </div>
-                            <button class="btn btn-primary mb-1" onclick="saveAbsensi()"><i class="bi bi-save"></i>
-                                Simpan Data</button>
                         </div>
                     </div>
                 </div>
 
                 <div class="card-custom">
-                    <div class="card-header-custom">
-                        <h5 class="card-title-custom">Tabel Absensi</h5>
-                    </div>
                     <div class="card-body">
-                        <div class="alert alert-info py-2 small"><i class="bi bi-info-circle"></i> H (Hadir), S (Sakit),
-                            I (Izin), A (Alpha). Tambahkan kolom jika butuh hari baru.</div>
-                        <div class="table-responsive table-responsive-custom">
-                            <table class="table table-bordered table-dynamic" id="table-absen">
-                                <thead>
-                                    <tr class="table-primary" id="absen-thead"></tr>
-                                </thead>
-                                <tbody id="absen-tbody"></tbody>
-                            </table>
+                        <div class="ag-tabs" role="tablist" aria-label="Tampilan absensi">
+                            <button type="button" role="tab" class="ag-tab active" id="absen-tab-harian" onclick="absenSetMode('harian')">Input Harian</button>
+                            <button type="button" role="tab" class="ag-tab" id="absen-tab-rekap" onclick="absenSetMode('rekap')">Rekap Bulanan</button>
                         </div>
+                        <div id="absen-konten" class="ag-panel"></div>
                     </div>
                 </div>
 
-                <div class="card-custom mt-4" id="absensi-chart-container" style="display:none;">
-                    <div class="card-header-custom">
-                        <h5 class="card-title-custom"><i class="bi bi-bar-chart-fill me-2 text-primary"></i> Grafik
-                            Kehadiran Bulan Ini</h5>
-                    </div>
-                    <div class="card-body"><canvas id="chartAbsensi" height="250"></canvas></div>
-                </div>
             </div>
 
             <div id="view-nilai" class="view-section">
                 <div class="card-custom mb-3" style="overflow: visible !important; position: relative; z-index: 20;">
                     <div class="card-body row align-items-end">
                         <div class="col-md-3 col-6 mb-2">
-                            <label class="form-label mb-1">Kelas</label>
+                            <label class="form-label mb-1" for="nilai-kelas">Kelas</label>
                             <select class="form-select" id="nilai-kelas" onchange="loadNilaiData()"></select>
                         </div>
                         <div class="col-md-3 col-6 mb-2">
-                            <label class="form-label mb-1">Mapel</label>
+                            <label class="form-label mb-1" for="nilai-mapel">Mapel</label>
                             <div class="input-group">
                                 <select class="form-select" id="nilai-mapel" onchange="loadNilaiData()">
                                     <option value="">-- Pilih Mapel --</option>
                                 </select>
                                 <button class="btn btn-outline-primary" type="button" onclick="showAddMapelModal()"
-                                    title="Tambah Mapel Baru"><i class="bi bi-plus"></i></button>
+                                    title="Tambah Mapel Baru" aria-label="Tambah mata pelajaran"><i class="bi bi-plus"></i></button>
                                 <button class="btn btn-outline-secondary" type="button" onclick="showManageMapelModal()"
-                                    title="Edit/Hapus Mata Pelajaran"><i class="bi bi-gear"></i></button>
+                                    title="Edit/Hapus Mata Pelajaran" aria-label="Kelola mata pelajaran"><i class="bi bi-gear"></i></button>
                             </div>
                         </div>
                         <div class="col-md-3 col-6 mb-2">
-                            <label class="form-label mb-1">Penilaian</label>
+                            <label class="form-label mb-1" for="nilai-jenis">Penilaian</label>
                             <select class="form-select" id="nilai-jenis" onchange="loadNilaiData()">
                                 <option value="Formatif">Penilaian Harian</option>
                                 <option value="SumatifLM">Penilaian Tengah Semester</option>
@@ -1612,28 +1937,13 @@
                             </select>
                         </div>
                         <div class="col-md-3 col-6 mb-2">
-                            <label class="form-label mb-1">Bulan</label>
-                            <select class="form-select" id="nilai-bulan" onchange="loadNilaiData()">
-                                <option value="07">Juli</option>
-                                <option value="08">Agustus</option>
-                                <option value="09">September</option>
-                                <option value="10">Oktober</option>
-                                <option value="11">November</option>
-                                <option value="12">Desember</option>
-                                <option value="01">Januari</option>
-                                <option value="02">Februari</option>
-                                <option value="03">Maret</option>
-                                <option value="04">April</option>
-                                <option value="05">Mei</option>
-                                <option value="06">Juni</option>
+                            <label class="form-label mb-1" for="nilai-semester">Semester</label>
+                            <select class="form-select" id="nilai-semester" onchange="loadNilaiData()">
+                                <option value="ganjil">Ganjil (Jul–Des)</option>
+                                <option value="genap">Genap (Jan–Jun)</option>
                             </select>
                         </div>
-                        <div class="col-12 mt-2 text-md-end text-center">
-                            <button class="btn btn-info px-3 mb-2 text-white fw-bold me-1" id="btn-add-nilai-col"
-                                onclick="addNilaiColumn()" style="display:none;"><i class="bi bi-plus-circle"></i>
-                                Tambah Kolom</button>
-                            <button class="btn btn-primary px-4 mb-2 me-1" onclick="saveNilai()"><i
-                                    class="bi bi-save me-1"></i> Simpan</button>
+                        <div class="col-12 mt-1 text-md-end text-center">
                             <div class="dropdown d-inline-block mx-1 mb-2 position-relative" style="z-index: 1060;">
                                 <button class="btn btn-success dropdown-toggle px-3 fw-bold" type="button" id="btnDropdownDownloadNilai"
                                     onclick="toggleDownloadNilaiDropdown(event)">
@@ -1658,168 +1968,32 @@
                 <div class="row">
                     <div class="col-12">
                         <div class="card-custom">
-                            <div class="card-header-custom">
-                                <h5 class="card-title-custom" id="nilai-table-title">Input Nilai Siswa</h5>
-                            </div>
                             <div class="card-body">
-                                <div class="table-responsive table-responsive-custom" id="container-table-nilai">
-                                    <div class="alert alert-secondary text-center">Silakan pilih Kelas dan Mata
-                                        Pelajaran.</div>
+                                <div class="ag-tabs" role="tablist" aria-label="Tampilan nilai" id="nilai-tabs">
+                                    <button type="button" role="tab" class="ag-tab active" id="nilai-tab-input" onclick="nilaiSetMode('input')">Input per Penilaian</button>
+                                    <button type="button" role="tab" class="ag-tab" id="nilai-tab-rekap" onclick="nilaiSetMode('rekap')">Rekap Nilai</button>
+                                </div>
+                                <div id="container-table-nilai" class="ag-panel">
+                                    <div class="alert alert-secondary text-center mb-0">Silakan pilih Kelas dan Mata Pelajaran.</div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="row mt-2" id="nilai-stats-container" style="display:none;">
-                    <div class="col-md-6 mb-3">
-                        <div class="card bg-success text-white border-0 shadow-sm anim-popup h-100">
-                            <div class="card-body d-flex align-items-center p-3 p-md-4">
-                                <i class="bi bi-trophy-fill me-3 opacity-75" style="font-size: 2.5rem;"></i>
-                                <div>
-                                    <h6 class="mb-1 opacity-75 text-uppercase fw-bold small">Rata-rata Tertinggi</h6>
-                                    <h4 class="fw-bold mb-0" id="stat-nilai-max-name">-</h4>
-                                    <span class="badge bg-light text-success mt-2" id="stat-nilai-max-val">Nilai:
-                                        0</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <div class="card bg-danger text-white border-0 shadow-sm anim-popup h-100">
-                            <div class="card-body d-flex align-items-center p-3 p-md-4">
-                                <i class="bi bi-exclamation-triangle-fill me-3 opacity-75"
-                                    style="font-size: 2.5rem;"></i>
-                                <div>
-                                    <h6 class="mb-1 opacity-75 text-uppercase fw-bold d-flex align-items-center small">
-                                        Di Bawah KKM (<input type="number" id="input-kkm"
-                                            class="form-control form-control-sm mx-2 text-center text-dark fw-bold border-0 shadow-none"
-                                            style="width: 45px; height: 20px; padding: 0;" value="75"
-                                            oninput="calculateStatsNilai(true)">)
-                                    </h6>
-                                    <h4 class="fw-bold mb-0" id="stat-nilai-kkm-count">0 Siswa</h4>
-                                    <small class="mt-2 d-block opacity-75" id="stat-nilai-kkm-names">-</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="row mt-2" id="nilai-chart-container" style="display:none;">
-                    <div class="col-12">
-                        <div class="card-custom h-100">
-                            <div class="card-header-custom">
-                                <h5 class="card-title-custom"><i class="bi bi-bar-chart-line me-2 text-primary"></i>
-                                    Grafik Nilai</h5>
-                            </div>
-                            <div class="card-body"><canvas id="chartNilai" height="250"></canvas></div>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <div id="view-kokurikuler" class="view-section">
-                <!-- Header Nilai Kokurikuler dengan Navigasi Tab Internal -->
-                <div class="card-custom mb-4">
-                    <div class="card-body p-3 p-md-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-                        <div>
-                            <h4 class="fw-bold mb-1" style="color: var(--navy-deep); letter-spacing: -0.3px;">Nilai Kokurikuler</h4>
-                            <p class="text-muted small mb-0">Kelola penilaian projek kokurikuler (Lintas Mapel / Tema Kokurikuler) dan capaian profil siswa.</p>
+                <div class="card-custom mb-3">
+                    <div class="card-body">
+                        <div class="ag-viewhead">
+                            <div><h4 class="ag-viewtitle">Nilai Kokurikuler</h4><p class="ag-viewsub">Pilih projek, lalu ketuk predikat tiap siswa. Deskripsi rapor tersusun otomatis.</p></div>
+                            <div class="ag-viewfilters"><label class="ag-field">Kelas<select class="form-select" id="koku-kelas" onchange="onKokuClassChange()"></select></label></div>
                         </div>
-                        <div class="d-flex align-items-center flex-wrap gap-2">
-                            <button type="button" class="btn btn-primary" id="btn-tab-koku-input" onclick="switchKokuTab('input')">
-                                <i class="bi bi-plus-lg"></i> + Input Nilai
-                            </button>
-                            <button type="button" class="btn btn-outline-primary" id="btn-tab-koku-riwayat" onclick="switchKokuTab('riwayat')">
-                                <i class="bi bi-clock-history"></i> Lihat Riwayat Nilai
-                            </button>
-                        </div>
+                        <div class="ag-tabs mb-0" role="tablist"><button type="button" role="tab" class="ag-tab active" id="btn-tab-koku-input" onclick="switchKokuTab('input')">Input Penilaian</button><button type="button" role="tab" class="ag-tab" id="btn-tab-koku-riwayat" onclick="switchKokuTab('riwayat')">Riwayat &amp; Unduh</button></div>
                     </div>
                 </div>
-
-                <!-- Tampilan 1: Form Input Nilai Kokurikuler (Default) -->
-                <div id="koku-subview-input">
-                    <div class="card-custom mb-4">
-                        <div class="card-header-custom">
-                            <h5 class="card-title-custom" id="koku-form-title">
-                                <i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Penilaian Kokurikuler
-                            </h5>
-                        </div>
-                        <div class="card-body p-4">
-                            <div class="row">
-                                <div class="col-md-3 col-6 mb-3">
-                                    <label class="form-label mb-1">Kelas</label>
-                                    <select class="form-select" id="koku-kelas" onchange="onKokuClassChange()"></select>
-                                </div>
-                                <div class="col-md-3 col-6 mb-3">
-                                    <label class="form-label mb-1">Tanggal Pelaksanaan</label>
-                                    <input type="date" class="form-control" id="koku-tanggal">
-                                </div>
-                                <div class="col-md-6 col-12 mb-3">
-                                    <label class="form-label mb-1">Jenis Penilaian</label>
-                                    <select class="form-select" id="koku-jenis">
-                                        <option value="LintasMapel">Lintas Mata Pelajaran</option>
-                                        <option value="7KAIH">7KAIH</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-5 mb-3">
-                                    <label class="form-label mb-1">Nama Projek</label>
-                                    <input type="text" class="form-control" id="koku-projek" placeholder="Cth: Daur Ulang Sampah / Kearifan Lokal">
-                                </div>
-                                <div class="col-md-7 mb-3">
-                                    <label class="form-label mb-1">Deskripsi Projek</label>
-                                    <textarea class="form-control" id="koku-deskripsi" rows="2" placeholder="Uraikan ringkasan kegiatan dan tujuan pembelajaran projek..."></textarea>
-                                </div>
-                            </div>
-                            <hr>
-                            <h6 class="fw-bold mb-2" style="color: var(--navy-deep);">Pilih Dimensi Profil Pelajar</h6>
-                            <div id="koku-dimensi-container" class="row g-2 mb-4"></div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-primary flex-grow-1 py-2 fw-bold" onclick="generateKokuTable()">
-                                    <i class="bi bi-table me-1"></i> Buat Format Tabel Penilaian
-                                </button>
-                                <button class="btn btn-outline-secondary py-2" id="btn-cancel-edit-koku" onclick="cancelEditKoku()" style="display:none;">
-                                    <i class="bi bi-x-circle me-1"></i> Batal Edit
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tabel Lembar Penilaian Siswa -->
-                    <div class="card-custom mb-4" id="koku-result-section" style="display:none;">
-                        <div class="card-header-custom">
-                            <h5 class="card-title-custom mb-2 mb-md-0">
-                                <i class="bi bi-card-checklist" style="color: var(--primary-blue);"></i> Daftar Penilaian Siswa
-                            </h5>
-                            <div>
-                                <button class="btn btn-sm btn-success px-3 fw-bold" onclick="saveAllKoku()">
-                                    <i class="bi bi-save me-1"></i> Simpan Data Penilaian
-                                </button>
-                            </div>
-                        </div>
-                        <div class="card-body p-4">
-                            <div class="alert alert-info py-2 px-3 small mb-3">
-                                <i class="bi bi-info-circle me-1"></i> Tentukan predikat/kategori nilai setiap siswa; deskripsi capaian profil pelajar akan terbuat otomatis.
-                            </div>
-                            <div class="table-responsive">
-                                <table class="table table-bordered table-hover text-sm" style="min-width: 650px;">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th width="6%" class="text-center">No</th>
-                                            <th width="22%">Nama Siswa</th>
-                                            <th width="20%">Kategori Nilai</th>
-                                            <th width="52%">Deskripsi Capaian Profil Otomatis</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="koku-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
+                <div id="koku-subview-input" class="ag-panel"></div>
                 <!-- Tampilan 2: Riwayat Nilai Kokurikuler -->
                 <div id="koku-subview-riwayat" style="display: none;">
                     <div class="card-custom mb-4">
@@ -1875,123 +2049,16 @@
 
             <!-- View: Nilai Ekstrakurikuler -->
             <div id="view-ekstrakurikuler" class="view-section">
-                <!-- Header Banner Nilai Ekstrakurikuler dengan Navigasi Tab Internal -->
-                <div class="card-custom mb-4">
-                    <div class="card-body p-3 p-md-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-                        <div>
-                            <h4 class="fw-bold mb-1" style="color: var(--navy-deep); letter-spacing: -0.3px;">
-                                <i class="bi bi-trophy text-warning me-2"></i>Nilai Ekstrakurikuler
-                            </h4>
-                            <p class="text-muted small mb-0">Kelola kegiatan ekstrakurikuler, predikat capaian, dan catatan evaluasi perkembangan siswa yang terhubung langsung ke Rapor Siswa.</p>
+                <div class="card-custom mb-3">
+                    <div class="card-body">
+                        <div class="ag-viewhead">
+                            <div><h4 class="ag-viewtitle">Nilai Ekstrakurikuler</h4><p class="ag-viewsub">Pilih kegiatan, lalu ketuk predikat untuk siswa yang ikut. Keterangan rapor terisi otomatis.</p></div>
+                            <div class="ag-viewfilters"><label class="ag-field">Kelas<select class="form-select" id="ekskul-kelas" onchange="onEkskulClassChange()"></select></label><label class="ag-field">Semester<select class="form-select" id="ekskul-semester" onchange="renderEkskulInput()"><option value="ganjil">Ganjil</option><option value="genap">Genap</option></select></label><div class="ag-field">Tahun Pelajaran<span class="ag-tpchip" id="ekskul-tp-label">TP</span></div><datalist id="list-ekskul-preset"></datalist></div>
                         </div>
-                        <div class="d-flex align-items-center flex-wrap gap-2">
-                            <button type="button" class="btn btn-primary" id="btn-tab-ekskul-input" onclick="switchEkskulTab('input')">
-                                <i class="bi bi-plus-lg"></i> + Input Nilai Ekskul
-                            </button>
-                            <button type="button" class="btn btn-outline-primary" id="btn-tab-ekskul-riwayat" onclick="switchEkskulTab('riwayat')">
-                                <i class="bi bi-clock-history"></i> Daftar & Riwayat Ekskul
-                            </button>
-                        </div>
+                        <div class="ag-tabs mb-0" role="tablist"><button type="button" role="tab" class="ag-tab active" id="btn-tab-ekskul-input" onclick="switchEkskulTab('input')">Input per Kegiatan</button><button type="button" role="tab" class="ag-tab" id="btn-tab-ekskul-riwayat" onclick="switchEkskulTab('riwayat')">Rekap &amp; Riwayat</button></div>
                     </div>
                 </div>
-
-                <!-- Tampilan 1: Form Input Nilai Ekstrakurikuler -->
-                <div id="ekskul-subview-input">
-                    <div class="card-custom mb-4">
-                        <div class="card-header-custom">
-                            <h5 class="card-title-custom" id="ekskul-form-title">
-                                <i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Nilai Ekstrakurikuler Siswa
-                            </h5>
-                        </div>
-                        <div class="card-body p-4">
-                            <input type="hidden" id="ekskul-edit-id" value="">
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-3 col-6">
-                                    <label class="form-label small fw-bold mb-1">Kelas:</label>
-                                    <select class="form-select" id="ekskul-kelas" onchange="onEkskulClassChange()"></select>
-                                </div>
-                                <div class="col-md-3 col-6">
-                                    <label class="form-label small fw-bold mb-1">Nama Siswa:</label>
-                                    <select class="form-select" id="ekskul-siswa">
-                                        <option value="">-- Pilih Siswa --</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-3 col-6">
-                                    <label class="form-label small fw-bold mb-1">Semester:</label>
-                                    <select class="form-select" id="ekskul-semester">
-                                        <option value="ganjil">1 (Ganjil)</option>
-                                        <option value="genap" selected>2 (Genap)</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-3 col-6">
-                                    <label class="form-label small fw-bold mb-1">Tahun Pelajaran:</label>
-                                    <input type="text" class="form-control" id="ekskul-tapel" placeholder="Cth: 2024/2025">
-                                </div>
-                            </div>
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">Kegiatan Ekstrakurikuler:</label>
-                                    <div class="input-group">
-                                        <input type="text" class="form-control" id="ekskul-nama" list="list-ekskul-preset" placeholder="Cth: Pramuka, PMR, Paskibra, Seni Tari...">
-                                        <datalist id="list-ekskul-preset">
-                                            <option value="Pramuka">
-                                            <option value="PMR (Palang Merah Remaja)">
-                                            <option value="Paskibra">
-                                            <option value="Seni Tari">
-                                            <option value="Futsal">
-                                            <option value="Bola Basket">
-                                            <option value="Bulutangkis">
-                                            <option value="Rohis / Keagamaan">
-                                            <option value="Drumband / Marching Band">
-                                            <option value="Pencak Silat / Bela Diri">
-                                            <option value="English Club">
-                                            <option value="Sains Club / KIR">
-                                            <option value="Paduan Suara / Seni Musik">
-                                            <option value="Seni Rupa / Menggambar">
-                                            <option value="Jurnalistik">
-                                            <option value="Robotik / Komputer">
-                                        </datalist>
-                                    </div>
-                                </div>
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label small fw-bold mb-1">Predikat Capaian:</label>
-                                    <select class="form-select" id="ekskul-predikat">
-                                        <option value="Sangat Baik">Sangat Baik (A)</option>
-                                        <option value="Baik" selected>Baik (B)</option>
-                                        <option value="Cukup">Cukup (C)</option>
-                                        <option value="Kurang">Kurang (D)</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                    <label class="form-label small fw-bold mb-0">Keterangan / Evaluasi Perkembangan:</label>
-                                    <div class="dropdown">
-                                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle py-0 px-2" type="button" data-bs-toggle="dropdown">
-                                            <i class="bi bi-magic me-1"></i> Rekomendasi Narasi
-                                        </button>
-                                        <ul class="dropdown-menu dropdown-menu-end shadow">
-                                            <li><a class="dropdown-item small" href="javascript:void(0)" onclick="setEkskulTemplate('Konsisten hadir, namun perlu lebih percaya diri saat kegiatan.')">Konsisten hadir, namun perlu lebih percaya diri saat kegiatan.</a></li>
-                                            <li><a class="dropdown-item small" href="javascript:void(0)" onclick="setEkskulTemplate('Sangat aktif, berdedikasi tinggi, dan menunjukkan kemampuan kepemimpinan yang luar biasa.')">Sangat aktif & berdedikasi tinggi dalam kepemimpinan.</a></li>
-                                            <li><a class="dropdown-item small" href="javascript:void(0)" onclick="setEkskulTemplate('Aktif mengikuti latihan rutin dan mampu bekerja sama dengan sangat baik dalam tim.')">Aktif latihan rutin dan kerjasama tim sangat baik.</a></li>
-                                            <li><a class="dropdown-item small" href="javascript:void(0)" onclick="setEkskulTemplate('Menunjukkan minat dan antusiasme yang baik dalam mengembangkan bakat.')">Antusiasme baik dalam pengembangan bakat.</a></li>
-                                        </ul>
-                                    </div>
-                                </div>
-                                <textarea class="form-control" id="ekskul-keterangan" rows="3" placeholder="Tuliskan catatan evaluasi perkembangan siswa pada kegiatan ekstrakurikuler ini..."></textarea>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button type="button" class="btn btn-primary px-4 fw-bold" onclick="saveEkskul()">
-                                    <i class="bi bi-save me-1"></i> Simpan Nilai Ekstrakurikuler
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary px-3" id="btn-cancel-edit-ekskul" onclick="cancelEditEkskul()" style="display:none;">
-                                    <i class="bi bi-x-circle me-1"></i> Batal Edit
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
+                <div id="ekskul-subview-input" class="ag-panel"></div>
                 <!-- Tampilan 2: Riwayat / Daftar Nilai Ekstrakurikuler -->
                 <div id="ekskul-subview-riwayat" style="display:none;">
                     <div class="card-custom mb-4">
@@ -2031,91 +2098,56 @@
             </div>
 
             <div id="view-jurnal" class="view-section">
-                <!-- Header Jurnal Harian dengan Navigasi Tab Internal -->
-                <div class="card-custom mb-4">
-                    <div class="card-body p-3 p-md-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-                        <div>
-                            <h4 class="fw-bold mb-1" style="color: var(--navy-deep); letter-spacing: -0.3px;">Jurnal Harian</h4>
-                            <p class="text-muted small mb-0">Catat dan dokumentasikan kegiatan pembelajaran harian dengan mudah.</p>
+                <div class="card-custom mb-3">
+                    <div class="card-body">
+                        <div class="ag-viewhead">
+                            <div><h4 class="ag-viewtitle">Jurnal Harian</h4><p class="ag-viewsub">Ketuk pelajaran dari jadwal hari ini, tulis kegiatannya, lalu simpan.</p></div>
+                            
                         </div>
-                        <div class="d-flex align-items-center flex-wrap gap-2">
-                            <button type="button" class="btn btn-primary" id="btn-tab-jurnal-input" onclick="switchJurnalTab('input')">
-                                <i class="bi bi-plus-lg"></i> + Tambah Jurnal
-                            </button>
-                            <button type="button" class="btn btn-outline-primary" id="btn-tab-jurnal-riwayat" onclick="switchJurnalTab('riwayat')">
-                                <i class="bi bi-clock-history"></i> Lihat Riwayat Jurnal
-                            </button>
-                        </div>
+                        <div class="ag-tabs mb-0" role="tablist"><button type="button" role="tab" class="ag-tab active" id="btn-tab-jurnal-input" onclick="switchJurnalTab('input')">Isi Jurnal</button><button type="button" role="tab" class="ag-tab" id="btn-tab-jurnal-riwayat" onclick="switchJurnalTab('riwayat')">Riwayat &amp; Unduh PDF</button></div>
                     </div>
                 </div>
-
-                <!-- Tampilan 1: Input Jurnal (Default) -->
-                <div id="jurnal-subview-input">
-                    <div class="card-custom mb-4">
-                        <div class="card-header-custom">
-                            <h5 class="card-title-custom" id="jurnal-form-title">
-                                <i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Jurnal Harian
-                            </h5>
-                        </div>
-                        <div class="card-body p-4">
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-3 col-sm-6">
-                                    <label class="form-label">Tanggal Pelaksanaan</label>
-                                    <input type="date" class="form-control" id="jurnal-date">
-                                </div>
-                                <div class="col-md-3 col-sm-6">
-                                    <label class="form-label">Kelas</label>
-                                    <select class="form-select" id="jurnal-kelas"></select>
-                                </div>
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label">Mata Pelajaran</label>
+                <div id="jurnal-subview-input" class="ag-split">
+                    <div class="ag-split-main ag-panel">
+                        <div class="card-custom"><div class="card-body ag-panel" id="jurnal-jadwal-box"></div></div>
+                        <div class="card-custom"><div class="card-body ag-panel">
+                            <h5 class="ag-formtitle" id="jurnal-form-title">Isi jurnal</h5>
+                            <input type="hidden" id="jurnal-date">
+                            <div class="ag-formgrid ag-formgrid-2">
+                                <label class="ag-field">Kelas<select class="form-select" id="jurnal-kelas"></select></label>
+                                <div class="ag-field">Mata pelajaran
                                     <div class="input-group">
-                                        <select class="form-select" id="jurnal-mapel">
-                                            <option value="">-- Pilih Mapel --</option>
-                                        </select>
-                                        <button class="btn btn-outline-primary" type="button" onclick="showAddMapelModal()" title="Tambah Mapel Baru"><i class="bi bi-plus"></i></button>
-                                        <button class="btn btn-outline-secondary" type="button" onclick="showManageMapelModal()" title="Edit/Hapus Mata Pelajaran"><i class="bi bi-gear"></i></button>
+                                        <select class="form-select" id="jurnal-mapel" aria-label="Mata pelajaran"><option value="">-- Pilih Mapel --</option></select>
+                                        <button class="btn btn-outline-primary" type="button" onclick="showAddMapelModal()" title="Tambah Mapel Baru" aria-label="Tambah mata pelajaran"><i class="bi bi-plus"></i></button>
+                                        <button class="btn btn-outline-secondary" type="button" onclick="showManageMapelModal()" title="Edit/Hapus Mata Pelajaran" aria-label="Kelola mata pelajaran"><i class="bi bi-gear"></i></button>
                                     </div>
                                 </div>
                             </div>
-                            <div class="row g-3 mb-3">
-                                <div class="col-12">
-                                    <label class="form-label">Isi Jurnal / Kegiatan Pembelajaran</label>
-                                    <input type="text" class="form-control" id="jurnal-content" placeholder="Masukkan kegiatan pembelajaran, materi, atau evaluasi...">
+                            <label class="ag-field">Kegiatan pembelajaran
+                                <textarea class="form-control" id="jurnal-content" rows="4" placeholder="Contoh: Menjelaskan pecahan senilai, siswa berlatih 10 soal secara berpasangan."></textarea></label>
+                            <div class="ag-chips ag-chips-sm"><span class="ag-steptitle align-self-center">Tambahkan cepat:</span>
+                                <button type="button" class="ag-chip" onclick="jurnalTambahCepat('Menjelaskan materi')">+ Menjelaskan materi</button><button type="button" class="ag-chip" onclick="jurnalTambahCepat('Diskusi kelompok')">+ Diskusi kelompok</button><button type="button" class="ag-chip" onclick="jurnalTambahCepat('Latihan soal')">+ Latihan soal</button><button type="button" class="ag-chip" onclick="jurnalTambahCepat('Penilaian harian')">+ Penilaian harian</button><button type="button" class="ag-chip" onclick="jurnalTambahCepat('Praktik / percobaan')">+ Praktik / percobaan</button><button type="button" class="ag-chip" onclick="jurnalTambahCepat('Presentasi siswa')">+ Presentasi siswa</button>
+                            </div>
+                            <div id="jurnal-file-preview" style="display:none;">
+                                <div class="d-flex align-items-center gap-2 p-2 rounded border bg-light">
+                                    <img id="jurnal-file-preview-img" src="" alt="Pratinjau foto" style="width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid #E2E8F0;">
+                                    <div class="flex-grow-1 overflow-hidden">
+                                        <div class="small fw-semibold text-truncate" id="jurnal-file-name">foto.jpg</div>
+                                        <div class="text-muted" style="font-size:0.75rem;" id="jurnal-file-desc">Foto Dokumentasi</div>
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearJurnalFile()" title="Hapus foto" aria-label="Hapus foto"><i class="bi bi-x-lg"></i></button>
                                 </div>
                             </div>
-                            <div class="row g-3 align-items-center">
-                                <div class="col-md-6 col-12">
-                                    <label class="form-label">File Bukti / Foto Kegiatan (Opsional)</label>
-                                    <input type="file" class="form-control" id="jurnal-file" accept="image/*,application/pdf" onchange="previewJurnalFile(event)">
-                                    <div id="jurnal-file-preview" class="mt-2" style="display:none;">
-                                        <div class="d-flex align-items-center gap-2 p-2 rounded border bg-light">
-                                            <img id="jurnal-file-preview-img" src="" style="width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid #E2E8F0;">
-                                            <div class="flex-grow-1 overflow-hidden">
-                                                <div class="small fw-semibold text-truncate" id="jurnal-file-name">foto.jpg</div>
-                                                <div class="text-muted" style="font-size:0.75rem;" id="jurnal-file-desc">Foto Dokumentasi</div>
-                                            </div>
-                                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearJurnalFile()" title="Hapus foto"><i class="bi bi-x-lg"></i></button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6 col-12 text-md-end text-start mt-md-4">
-                                    <div class="form-check d-inline-block text-start me-md-3 mb-2 mb-md-0">
-                                        <input class="form-check-input" type="checkbox" id="jurnal-sync-cal" checked>
-                                        <label class="form-check-label small" for="jurnal-sync-cal">
-                                            Sync ke Google Calendar
-                                        </label>
-                                    </div>
-                                    <button class="btn btn-primary px-4" id="btn-save-jurnal" onclick="saveJurnal()">
-                                        <i class="bi bi-save me-1"></i> Simpan
-                                    </button>
-                                    <button class="btn btn-outline-secondary ms-1" id="btn-cancel-edit-jurnal" onclick="cancelEditJurnal()" style="display:none;">
-                                        <i class="bi bi-x-circle me-1"></i> Batal Edit
-                                    </button>
-                                </div>
+                            <div class="ag-jurnal-actions">
+                                <label class="ag-btn ag-filebtn"><i class="bi bi-camera"></i> Foto kegiatan (opsional)<input type="file" id="jurnal-file" accept="image/*,application/pdf" onchange="previewJurnalFile(event)" aria-label="Foto kegiatan"></label>
+                                <label class="ag-checkline"><input type="checkbox" id="jurnal-sync-cal" checked> Masukkan ke Google Calendar</label>
+                                <span class="flex-grow-1"></span>
+                                <button type="button" class="ag-btn" id="btn-cancel-edit-jurnal" onclick="cancelEditJurnal(); renderJurnalInput()" style="display:none;">Batal ubah</button>
+                                <button type="button" class="ag-btn ag-btn-primary" id="btn-save-jurnal" onclick="saveJurnal()"><i class="bi bi-save me-1"></i> Simpan jurnal</button>
                             </div>
-                        </div>
+                        </div></div>
                     </div>
+                    <div class="ag-split-side"><div class="card-custom"><div class="card-body" id="jurnal-minggu"></div></div></div>
                 </div>
 
                 <!-- Tampilan 2: Riwayat Jurnal -->
@@ -2169,124 +2201,32 @@
             </div>
 
             <div id="view-jadwal" class="view-section">
-                <div class="card-custom">
-                    <div class="card-header-custom">
-                        <h5 class="card-title-custom mb-2 mb-md-0">Jadwal Pelajaran</h5>
-                        <button class="btn btn-sm btn-primary" onclick="showAddScheduleModal()"><i
-                                class="bi bi-plus"></i> Tambah Jadwal</button>
-                    </div>
+                <div class="card-custom mb-3">
                     <div class="card-body">
-                        <div class="row mb-4">
-                            <div class="col-md-4 col-12">
-                                <label class="form-label fw-bold text-primary">Pilih Kelas Dahulu:</label>
-                                <select class="form-select border-primary" id="filter-sched-class"
-                                    onchange="renderSchedule()"></select>
-                            </div>
+                        <div class="ag-viewhead">
+                            <div><h4 class="ag-viewtitle">Jadwal Pelajaran</h4><p class="ag-viewsub">Tambah pelajaran langsung di kolom harinya dan pilih jam ke berapa. Jadwal ini dipakai untuk mengisi Jurnal Harian dengan cepat.</p></div>
+                            <div class="ag-viewfilters"><label class="ag-field">Kelas<select class="form-select" id="filter-sched-class" onchange="jadwalTambahHari=''; renderSchedule()"></select></label></div>
                         </div>
-                        <div class="row" id="schedule-container">
-                            <div class="col-12 text-center text-muted py-5">
-                                <i class="bi bi-calendar-x" style="font-size: 3rem;"></i>
-                                <p class="mt-3">Silakan pilih kelas terlebih dahulu untuk melihat jadwal.</p>
-                            </div>
-                        </div>
+                        <div class="ag-jaminfo"><i class="bi bi-clock" aria-hidden="true"></i><span id="jam-pelajaran-info"></span>
+                            <button type="button" class="ag-btn" onclick="jadwalAturJam()">Atur jam pelajaran</button>
+                            <button type="button" class="ag-btn" onclick="jadwalSalinHari()">Salin dari hari lain</button></div>
                     </div>
                 </div>
+                <div id="schedule-container"></div>
+                <p class="ag-hint mt-2">Ketuk satu pelajaran untuk mengubah atau menghapusnya.</p>
             </div>
 
             <div id="view-poin" class="view-section">
-                <!-- Header Poin Siswa dengan Navigasi Tab Internal -->
-                <div class="card-custom mb-4">
-                    <div class="card-body p-3 p-md-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-                        <div>
-                            <h4 class="fw-bold mb-1" style="color: var(--navy-deep); letter-spacing: -0.3px;">Poin Siswa</h4>
-                            <p class="text-muted small mb-0">Catat dan kelola poin pelanggaran serta reward prestasi untuk pembinaan karakter siswa.</p>
+                <div class="card-custom mb-3">
+                    <div class="card-body">
+                        <div class="ag-viewhead">
+                            <div><h4 class="ag-viewtitle">Poin Siswa</h4><p class="ag-viewsub">Pilih kejadian, centang siswanya, lalu simpan. Bisa beberapa siswa sekaligus.</p></div>
+                            <div class="ag-viewfilters"><label class="ag-field">Kelas<select class="form-select" id="poin-kelas" onchange="populatePoinStudentSelect()"></select></label><label class="ag-field">Tanggal<input type="date" class="form-control" id="poin-tanggal" oninput="poinSegarkanBar()"></label></div>
                         </div>
-                        <div class="d-flex align-items-center flex-wrap gap-2">
-                            <button type="button" class="btn btn-primary" id="btn-tab-poin-input" onclick="switchPoinTab('input')">
-                                <i class="bi bi-plus-lg"></i> + Input Poin Siswa
-                            </button>
-                            <button type="button" class="btn btn-outline-primary" id="btn-tab-poin-riwayat" onclick="switchPoinTab('riwayat')">
-                                <i class="bi bi-clock-history"></i> Lihat Riwayat & Rekap Poin
-                            </button>
-                        </div>
+                        <div class="ag-tabs mb-0" role="tablist"><button type="button" role="tab" class="ag-tab active" id="btn-tab-poin-input" onclick="switchPoinTab('input')">Catat Poin</button><button type="button" role="tab" class="ag-tab" id="btn-tab-poin-riwayat" onclick="switchPoinTab('riwayat')">Riwayat &amp; Rekap</button></div>
                     </div>
                 </div>
-
-                <!-- Tampilan 1: Form Input Poin Siswa (Default) -->
-                <div id="poin-subview-input">
-                    <div class="card-custom mb-4">
-                        <div class="card-header-custom">
-                            <h5 class="card-title-custom" id="poin-form-title">
-                                <i class="bi bi-pencil-square" style="color: var(--teal-accent);"></i> Form Input Poin Siswa
-                            </h5>
-                        </div>
-                        <div class="card-body p-4">
-                            <div class="row">
-                                <div class="col-md-4 col-sm-6 mb-3">
-                                    <label class="form-label mb-1">Kelas</label>
-                                    <select class="form-select" id="poin-kelas" onchange="populatePoinStudentSelect()"></select>
-                                </div>
-                                <div class="col-md-5 col-sm-6 mb-3">
-                                    <label class="form-label mb-1">Nama Siswa</label>
-                                    <select class="form-select" id="poin-siswa">
-                                        <option value="">-- Pilih Kelas Dahulu --</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-3 col-12 mb-3">
-                                    <label class="form-label mb-1">Tanggal</label>
-                                    <input type="date" class="form-control" id="poin-tanggal">
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-3 col-6 mb-3">
-                                    <label class="form-label mb-1 text-success fw-bold"><i class="bi bi-award me-1"></i> Poin Reward (+)</label>
-                                    <input type="number" min="0" class="form-control" id="poin-reward" placeholder="0" value="0">
-                                </div>
-                                <div class="col-md-3 col-6 mb-3">
-                                    <label class="form-label mb-1 text-danger fw-bold"><i class="bi bi-exclamation-triangle me-1"></i> Poin Pelanggaran (-)</label>
-                                    <input type="number" min="0" class="form-control" id="poin-pelanggaran" placeholder="0" value="0">
-                                </div>
-                                <div class="col-md-6 col-12 mb-3">
-                                    <label class="form-label mb-1">Keterangan / Catatan Pembinaan</label>
-                                    <input type="text" class="form-control" id="poin-keterangan" placeholder="Cth: Juara Lomba Cerdas Cermat / Terlambat Masuk Kelas">
-                                </div>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-primary flex-grow-1 fw-bold py-2" id="btn-save-poin" onclick="savePoin()">
-                                    <i class="bi bi-save me-1"></i> Simpan Data Poin
-                                </button>
-                                <button class="btn btn-outline-secondary fw-bold py-2" id="btn-cancel-edit-poin" onclick="cancelEditPoin()" style="display:none;">
-                                    <i class="bi bi-x-circle me-1"></i> Batal Edit
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Ringkasan Akumulasi Poin Kelas yang Sedang Diinput -->
-                    <div class="card-custom mb-4" id="poin-quick-summary-section">
-                        <div class="card-header-custom">
-                            <h5 class="card-title-custom mb-0">
-                                <i class="bi bi-bar-chart-steps" style="color: var(--primary-blue);"></i> Akumulasi Poin Siswa (Kelas Terpilih)
-                            </h5>
-                        </div>
-                        <div class="card-body p-4">
-                            <div class="table-responsive">
-                                <table class="table table-bordered table-hover text-sm" style="min-width: 500px;">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th width="35%">Nama Siswa</th>
-                                            <th width="20%" class="text-center">Total Reward (+)</th>
-                                            <th width="20%" class="text-center">Total Pelanggaran (-)</th>
-                                            <th width="25%" class="text-center">Total Akumulasi Poin</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="poin-quick-summary-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
+                <div id="poin-subview-input" class="ag-panel"></div>
                 <!-- Tampilan 2: Riwayat & Rekap Poin Siswa -->
                 <div id="poin-subview-riwayat" style="display: none;">
                     <div class="card-custom mb-4">
@@ -2514,112 +2454,26 @@
 
             <!-- View: Cetak Rapor Siswa (Kurikulum Merdeka) -->
             <div id="view-rapor" class="view-section">
-                <!-- Header Banner -->
-                <div class="card-custom mb-4 p-4 no-print" style="background: linear-gradient(135deg, #172B4D 0%, #243B5A 100%); color: #fff;">
-                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="p-3 rounded-4" style="background: rgba(255, 255, 255, 0.12); backdrop-filter: blur(8px);">
-                                <i class="bi bi-printer-fill fs-2 text-warning"></i>
-                            </div>
-                            <div>
-                                <h4 class="fw-bold mb-1 text-white">Cetak Laporan Capaian Belajar (Rapor Siswa)</h4>
-                                <p class="mb-0 text-white-50 small">Format Resmi Kurikulum Merdeka &bull; Lengkap dengan Nilai Akhir, Capaian Kompetensi (CP/TP), Kokurikuler, Presensi, & Lembar Tanda Tangan 3 Pihak</p>
+                <div class="card-custom mb-3 no-print">
+                    <div class="card-body">
+                        <div class="ag-viewhead">
+                            <div><h4 class="ag-viewtitle">Cetak Rapor Siswa</h4><p class="ag-viewsub">Lihat rapor siapa yang sudah siap, lengkapi yang kurang, lalu cetak atau unduh PDF.</p></div>
+                            <div class="ag-viewfilters">
+                                <label class="ag-field">Kelas<select class="form-select" id="rapor-kelas" onchange="raporBuka=null; onRaporKelasChange()"></select></label>
+                                <label class="ag-field">Semester<select class="form-select" id="rapor-semester" onchange="onRaporPeriodeChange()"><option value="ganjil">1 (Ganjil)</option><option value="genap">2 (Genap)</option></select></label>
+                                <div class="ag-field">Tahun Pelajaran<span class="ag-tpchip" id="rapor-tp-label"></span><input type="hidden" id="rapor-tapel"></div>
+                                <select id="rapor-siswa" class="d-none" aria-hidden="true" tabindex="-1" onchange="onRaporStudentChange()"></select>
                             </div>
                         </div>
-                        <div class="d-flex gap-2">
-                            <button type="button" class="btn btn-outline-light btn-sm fw-semibold" onclick="openBankTPModal()">
-                                <i class="bi bi-collection me-1"></i> Bank TP Kurikulum Merdeka
-                            </button>
-                        </div>
+                        <div class="ag-setrow" id="rapor-pengaturan"></div>
                     </div>
                 </div>
-
-                <!-- Form Pengaturan & Filter Sederhana Rapor -->
-                <div class="card-custom mb-4" id="rapor-filter-card">
-                    <div class="card-header-custom">
-                        <div class="d-flex align-items-center gap-2">
-                            <i class="bi bi-filter-circle text-primary fs-5"></i>
-                            <div>
-                                <h5 class="card-title-custom mb-0">Pilih Data Rapor Siswa</h5>
-                                <small class="text-muted">Pilih kelas, periode rapor, dan siswa untuk memuat rapor otomatis</small>
-                            </div>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2">
-                            <button type="button" class="btn btn-outline-secondary btn-sm fw-semibold" onclick="openModalPengaturanRapor()">
-                                <i class="bi bi-gear-fill me-1 text-primary"></i> Fase & Tanggal Rapor
-                            </button>
-                            <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" onclick="openModalCatatanWali()">
-                                <i class="bi bi-chat-left-quote-fill me-1"></i> Catatan Wali & Keputusan
-                            </button>
-                        </div>
-                    </div>
-                    <div class="card-body p-4">
-                        <div class="row g-3 align-items-end">
-                            <div class="col-md-3 col-sm-6 col-12">
-                                <label class="form-label small fw-bold mb-1"><i class="bi bi-diagram-3 me-1 text-primary"></i>Kelas / Rombel:</label>
-                                <select class="form-select" id="rapor-kelas" onchange="onRaporKelasChange()">
-                                </select>
-                            </div>
-                            <div class="col-md-2 col-sm-6 col-12">
-                                <label class="form-label small fw-bold mb-1"><i class="bi bi-calendar2-range me-1 text-primary"></i>Semester:</label>
-                                <select class="form-select" id="rapor-semester" onchange="onRaporPeriodeChange()">
-                                    <option value="ganjil">1 (Ganjil)</option>
-                                    <option value="genap" selected>2 (Genap)</option>
-                                </select>
-                            </div>
-                            <div class="col-md-3 col-sm-6 col-12">
-                                <label class="form-label small fw-bold mb-1"><i class="bi bi-calendar-event me-1 text-primary"></i>Tahun Pelajaran:</label>
-                                <input type="text" class="form-control" id="rapor-tapel" placeholder="Cth: 2024/2025" onchange="onRaporPeriodeChange()">
-                            </div>
-                            <div class="col-md-4 col-sm-6 col-12">
-                                <label class="form-label small fw-bold mb-1"><i class="bi bi-person-check me-1 text-primary"></i>Pilih Nama Siswa:</label>
-                                <select class="form-select" id="rapor-siswa" onchange="onRaporStudentChange()">
-                                    <option value="ALL">-- Cetak Seluruh Siswa di Kelas (Massal / Batch) --</option>
-                                </select>
-                            </div>
-                            <div class="col-12 pt-2 d-flex flex-wrap justify-content-between align-items-center gap-2 border-top">
-                                <div class="text-muted small">
-                                    <i class="bi bi-info-circle me-1 text-info"></i> Seluruh identitas siswa, nilai, presensi, kokurikuler, dan ekskul terintegrasi otomatis.
-                                </div>
-                                <div class="d-flex gap-2">
-                                    <button type="button" class="btn btn-primary px-4 py-2 fw-bold shadow-sm" onclick="previewRaporSiswa()">
-                                        <i class="bi bi-eye-fill me-1"></i> Tampilkan Pratinjau Rapor
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Pratinjau Ringkasan Lembar Rapor Siswa -->
-                <div class="card-custom mb-4 rapor-preview-wrapper">
-                    <div class="card-header-custom">
-                        <div class="d-flex align-items-center gap-2">
-                            <h5 class="card-title-custom mb-0">
-                                <i class="bi bi-file-earmark-text text-primary me-2"></i> Pratinjau Lembar Capaian Belajar Siswa
-                            </h5>
-                            <span class="badge bg-primary px-3 py-1" id="rapor-preview-target-badge">Semua Siswa</span>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2">
-                            <button type="button" class="btn btn-outline-secondary btn-sm fw-semibold" onclick="focusPilihSiswa()">
-                                <i class="bi bi-person-lines-fill me-1"></i> Ganti Siswa
-                            </button>
-                            <button type="button" class="btn btn-outline-primary btn-sm fw-bold" onclick="previewRaporSiswa()" title="Ambil ulang data terbaru dari seluruh modul">
-                                <i class="bi bi-arrow-repeat me-1"></i> Perbarui Pratinjau
-                            </button>
-                            <button type="button" class="btn btn-success btn-sm fw-bold shadow-sm" onclick="cetakRaporBrowser()" title="Cetak langsung ke printer via browser">
-                                <i class="bi bi-printer-fill me-1"></i> Cetak Dokumen
-                            </button>
-                            <button type="button" class="btn btn-danger btn-sm fw-bold shadow-sm px-3" onclick="prosesCetakRaporSiswaPDF()" title="Simpan sebagai file PDF resmi standar A4">
-                                <i class="bi bi-file-earmark-pdf-fill me-1"></i> Unduh PDF Rapor
-                            </button>
-                        </div>
-                    </div>
-                    <div class="card-body p-4">
-                        <div id="rapor-preview-container" class="p-3 border rounded-3 bg-light" style="min-height: 180px;">
-                            <!-- Pratinjau Nilai dan Data -->
-                        </div>
-                    </div>
+                <div class="ag-split ag-rapor-split">
+                    <div class="card-custom ag-rapor-list no-print"><div class="card-body ag-panel" id="rapor-kesiapan"></div></div>
+                    <div class="card-custom ag-rapor-preview"><div class="card-body ag-panel">
+                        <div class="no-print" id="rapor-nav"></div>
+                        <div id="rapor-preview-container" class="ag-rapor-paper"></div>
+                    </div></div>
                 </div>
             </div>
 
@@ -2635,6 +2489,8 @@
                         <span class="badge rounded-pill" id="profil-status-badge">-</span>
                     </div>
                 </div>
+
+                <div id="jenjang-rapor-box"></div>
 
                 <form id="form-profil-sekolah" onsubmit="simpanProfilSekolah(event)">
                     <div class="row g-4">
@@ -3441,7 +3297,7 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="app.js?v=20261113194753"></script>
+    <script src="app.js?v=20261117020403"></script>
     
 </body>
 
