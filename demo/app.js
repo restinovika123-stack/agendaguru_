@@ -2169,6 +2169,14 @@ window.AGENDA_GURU_LOADED = true;
         const p = String(iso).split('-').map(Number); const d = new Date(p[0], p[1] - 1, p[2] + n);
         return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     }
+    // Tombol "Pilih tanggal": buka kalender bawaan browser dari klik di mana pun pada tombol.
+    // Bila browser tidak mendukung showPicker, kotak tanggal ditampilkan agar bisa diisi langsung.
+    function agBukaKalender(ev, el) {
+        const inp = el.querySelector('input[type="date"]'); if (!inp || ev.target === inp) return;
+        ev.preventDefault();
+        try { if (typeof inp.showPicker === 'function') { inp.showPicker(); return; } } catch (e) { }
+        el.classList.add('ag-datepick-manual'); inp.focus();
+    }
     function agHariKe(iso) { const p = String(iso).split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]).getDay(); }
     function agTglPendek(iso) { if (!iso) return 'Tanpa tanggal'; const p = iso.split('-'); return Number(p[2]) + ' ' + AG_NAMA_BULAN[Number(p[1]) - 1].slice(0, 3); }
     function agIsiNilai(v) { return v !== undefined && v !== null && String(v).trim() !== ''; }
@@ -2268,7 +2276,7 @@ window.AGENDA_GURU_LOADED = true;
             <button type="button" class="ag-iconbtn" onclick="absenGeserHari(1)" aria-label="Hari berikutnya"><i class="bi bi-chevron-right"></i></button>
             <div class="ag-nav-tools">
                 ${tgl !== hariIni ? '<button type="button" class="ag-btn" onclick="absenKeTanggal(agTglHariIni())">Hari ini</button>' : ''}
-                <label class="ag-btn ag-datepick" title="Pilih tanggal"><i class="bi bi-calendar3"></i><span>Pilih tanggal</span>
+                <label class="ag-btn ag-datepick" title="Pilih tanggal" onclick="agBukaKalender(event, this)"><i class="bi bi-calendar3"></i><span>Pilih tanggal</span>
                     <input type="date" value="${tgl}" onchange="absenKeTanggal(this.value)" aria-label="Pilih tanggal absensi"></label>
             </div>
         </div>
@@ -5822,7 +5830,7 @@ window.AGENDA_GURU_LOADED = true;
         const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
 
         const fase = getFaseKelas(cid) || 'D';
-        const kota = db.config.schoolCity || RAPOR_KOSONG;
+        const kota = String(db.config.schoolCity || RAPOR_KOSONG).replace(/[\s,]+$/, '');   // tanpa koma ganda bila kota diisi dengan koma
         const tglStr = db.config.raporTanggal || tanggalHariIni();
         const sekolah = db.config.userSchool || RAPOR_KOSONG;
         const alamat = db.config.schoolAddress || RAPOR_KOSONG;
@@ -6108,13 +6116,13 @@ window.AGENDA_GURU_LOADED = true;
                 <!-- Baris 1: Orang Tua / Wali Murid sejajar dengan Guru / Wali Kelas -->
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
                     <div style="width:45%; text-align:center;">
-                        <div style="visibility:hidden; height:16px;">${escapeHtml(kota)}, ${escapeHtml(tglFormatted)}</div>
+                        <div style="visibility:hidden; min-height:16px;">${escapeHtml(kota)}, ${escapeHtml(tglFormatted)}</div>
                         <div>Orang Tua / Wali Murid,</div>
                         <div style="height:50px;"></div>
                         <div>..................................................</div>
                     </div>
                     <div style="width:45%; text-align:center;">
-                        <div style="height:16px;">${escapeHtml(kota)}, ${escapeHtml(tglFormatted)}</div>
+                        <div style="min-height:16px;">${escapeHtml(kota)}, ${escapeHtml(tglFormatted)}</div>
                         <div>Wali Kelas,</div>
                         <div style="height:50px;"></div>
                         <div><b>${escapeHtml(waliNama)}</b></div>
@@ -6316,10 +6324,10 @@ window.AGENDA_GURU_LOADED = true;
             </div>
             ${genap ? `<table style="width:100%; border-collapse:collapse; margin-bottom:14px;"><tr><th style="${th}">Keputusan</th></tr><tr><td style="${sel} padding:8px;">Berdasarkan pencapaian seluruh kompetensi, murid dinyatakan: <b>${escapeHtml(d.notes.keputusan || keputusanBawaan(className) || 'NAIK KELAS')}</b></td></tr></table>` : ''}
             <table style="width:100%; border-collapse:collapse; margin-bottom:22px;"><tr><th style="${th}">Tanggapan Orang Tua/Wali Murid</th></tr><tr><td style="border:1px solid #000; height:78px;"></td></tr></table>
-            <div style="display:flex; justify-content:space-between; text-align:center; font-size:11.5px;">
-                <div style="width:32%;"><div style="height:17px;"></div><b>Orang Tua Murid</b><div style="height:62px;"></div><div>(..................................)</div></div>
-                <div style="width:32%;"><div style="height:17px;"></div><b>Kepala Sekolah</b><div style="height:62px;"></div><div style="font-weight:bold; text-decoration:underline;">${escapeHtml(kepsekNama)}</div><div>${kepsekNip && kepsekNip !== '-' ? 'NIP. ' + escapeHtml(kepsekNip) : '&nbsp;'}</div></div>
-                <div style="width:32%;"><div style="height:17px;">${escapeHtml(kota)}, ${escapeHtml(tgl)}</div><b>Wali Kelas</b><div style="height:62px;"></div><div style="font-weight:bold; text-decoration:underline;">${escapeHtml(waliNama)}</div><div>${waliNip && waliNip !== '-' ? 'NIP. ' + escapeHtml(waliNip) : '&nbsp;'}</div></div>
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; text-align:center; font-size:11.5px;">
+                <div style="width:30%;"><div style="height:17px;"></div><b>Orang Tua Murid</b><div style="height:62px;"></div><div>(..................................)</div><div>&nbsp;</div></div>
+                <div style="width:30%;"><div style="height:17px;"></div><b>Kepala Sekolah</b><div style="height:62px;"></div><div style="font-weight:bold; text-decoration:underline;">${escapeHtml(kepsekNama)}</div><div>${kepsekNip && kepsekNip !== '-' ? 'NIP. ' + escapeHtml(kepsekNip) : '&nbsp;'}</div></div>
+                <div style="width:36%;"><div style="min-height:17px; line-height:1.35;">${escapeHtml(kota)}, ${escapeHtml(tgl)}</div><b>Wali Kelas</b><div style="height:62px;"></div><div style="font-weight:bold; text-decoration:underline;">${escapeHtml(waliNama)}</div><div>${waliNip && waliNip !== '-' ? 'NIP. ' + escapeHtml(waliNip) : '&nbsp;'}</div></div>
             </div>
         </div></div>`;
     }
@@ -6387,7 +6395,8 @@ window.AGENDA_GURU_LOADED = true;
         doc.autoTable({ head: [['Tanggapan Orang Tua/Wali Murid']], body: [['']], startY: y, theme: 'grid', headStyles: head, styles: Object.assign({}, sty, { minCellHeight: 22 }), margin: { left: 15, right: 15 } });
         const sy = doc.lastAutoTable.finalY + 8;
         doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
-        doc.text(`${o.kota}, ${tgl}`, 165, sy, { align: 'center' });
+        const baris = doc.splitTextToSize(`${o.kota}, ${tgl}`, 58);   // kota panjang turun ke atas, tidak menimpa 'Wali Kelas'
+        doc.text(baris, 165, sy - (baris.length - 1) * 3.6, { align: 'center' });
         doc.setFont('helvetica', 'bold');
         [['Orang Tua Murid', 45], ['Kepala Sekolah', 105], ['Wali Kelas', 165]].forEach(([t, x]) => doc.text(t, x, sy + 5, { align: 'center' }));
         doc.setFont('helvetica', 'normal'); doc.text('(..................................)', 45, sy + 27, { align: 'center' });
@@ -6479,7 +6488,7 @@ window.AGENDA_GURU_LOADED = true;
         const tapel = document.getElementById('rapor-tapel')?.value.trim() || getActiveTapel();
 
         const fase = getFaseKelas(cid) || 'D';
-        const kota = db.config.schoolCity || RAPOR_KOSONG;
+        const kota = String(db.config.schoolCity || RAPOR_KOSONG).replace(/[\s,]+$/, '');   // tanpa koma ganda bila kota diisi dengan koma
         const tglStr = db.config.raporTanggal || tanggalHariIni();
         const sekolah = db.config.userSchool || RAPOR_KOSONG;
         const alamat = db.config.schoolAddress || RAPOR_KOSONG;
@@ -6864,7 +6873,8 @@ window.AGENDA_GURU_LOADED = true;
                 doc.setFontSize(8);
 
                 // Baris 1 Kanan: Titimangsa & Wali Kelas (Kolom Kanan x=155)
-                doc.text(`${kota}, ${tglFormatted}`, 155, sigY, { align: 'center' });
+                const barisTgl = doc.splitTextToSize(`${kota}, ${tglFormatted}`, 70);
+                doc.text(barisTgl, 155, sigY - (barisTgl.length - 1) * 3.4, { align: 'center' });
                 doc.text('Wali Kelas,', 155, sigY + 4, { align: 'center' });
                 doc.setFont('times', 'bold');
                 doc.text(waliNama, 155, sigY + 18, { align: 'center' });
@@ -7419,7 +7429,7 @@ window.AGENDA_GURU_LOADED = true;
             <button type="button" class="ag-iconbtn" onclick="jurnalGeser(1)" aria-label="Hari berikutnya"><i class="bi bi-chevron-right"></i></button>
             <div class="ag-nav-tools">
                 ${tgl !== hariIni ? '<button type="button" class="ag-btn" onclick="jurnalKeTanggal(agTglHariIni())">Hari ini</button>' : ''}
-                <label class="ag-btn ag-datepick" title="Pilih tanggal"><i class="bi bi-calendar3"></i><span>Pilih tanggal</span>
+                <label class="ag-btn ag-datepick" title="Pilih tanggal" onclick="agBukaKalender(event, this)"><i class="bi bi-calendar3"></i><span>Pilih tanggal</span>
                     <input type="date" value="${tgl}" onchange="jurnalKeTanggal(this.value)" aria-label="Pilih tanggal jurnal"></label>
             </div></div>
             <div class="ag-steptitle">Jadwal hari ${hari} · ketuk untuk mengisi</div>`;
