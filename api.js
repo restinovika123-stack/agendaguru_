@@ -180,7 +180,7 @@
                     location.reload();
                 }).catch(function (err) {
                     btn.disabled = false; msg.style.color = '#C44747';
-                    msg.textContent = 'Gagal terhubung: ' + (err && err.message ? err.message : err);
+                    msg.textContent = window.agIzinBelumDiberikan(err) ? 'Izin Apps Script belum diberikan. ' + window.AG_LANGKAH_IZIN : 'Gagal terhubung: ' + (err && err.message ? err.message : err);
                 });
             };
             var demo = document.getElementById('ag-demo-btn'); if (demo) demo.onclick = function () { wrap.remove(); };
@@ -188,6 +188,9 @@
         });
     }
     window.agendaGuruShowConnect = function () { showConnect({ allowClose: true, allowDemo: false }); };
+    // "You do not have permission to call ..." = pemilik Spreadsheet belum memberi izin Apps Script (bukan masalah internet)
+    window.agIzinBelumDiberikan = function (err) { return /permission to call|Required permissions|Authorization is required/i.test(String((err && err.message) || err || '')); };
+    window.AG_LANGKAH_IZIN = 'Buka Spreadsheet AgendaGuru → Ekstensi → Apps Script → pilih fungsi izinkanAkses → ▶ Jalankan → Tinjau izin → pilih akun Anda → Lanjutan → Buka (tidak aman) → Izinkan. Setelah itu klik Terapkan → Kelola deployment → ✏️ Edit → Versi: Versi baru → Terapkan, lalu coba lagi.';
     // Tampilkan tautan "Ganti alamat Apps Script" (disembunyikan jika api.js tidak dipakai)
     onReady(function () {
         document.querySelectorAll('.ag-connect-link').forEach(function (el) { el.style.display = ''; });

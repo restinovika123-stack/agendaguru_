@@ -509,6 +509,11 @@ window.AGENDA_GURU_LOADED = true;
                     .withSuccessHandler(st => finish(() => showAuthScreen(!!(st && st.registered))))
                     .withFailureHandler(err => finish(() => {
                         showAuthScreen(true);
+                        if (window.agIzinBelumDiberikan && window.agIzinBelumDiberikan(err)) return Swal.fire({
+                            icon: 'warning', title: 'Izin Apps Script belum diberikan',
+                            html: '<div class="text-start small">Alamat aplikasi sudah benar, tetapi Apps Script belum diizinkan membuka Spreadsheet Anda.<br><br><b>Cara memperbaiki (±2 menit):</b><br>' + escapeHtml(window.AG_LANGKAH_IZIN) + '</div>',
+                            footer: '<small class="text-muted">' + escapeHtml((err && err.message) || err) + '</small>'
+                        });
                         Swal.fire({
                             icon: 'error', title: 'Tidak dapat terhubung ke server',
                             html: 'Periksa koneksi internet. Jika masih gagal, pastikan Aplikasi Web Apps Script di-deploy dengan akses <b>Siapa saja</b>.' +
