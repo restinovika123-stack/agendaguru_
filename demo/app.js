@@ -694,6 +694,7 @@ window.AGENDA_GURU_LOADED = true;
             if (db.config.registeredEmail) return Swal.fire('Pendaftaran Ditolak', 'Aplikasi ini sudah memiliki pengguna.', 'error');
 
             db.config.registeredEmail = email; db.config.registeredPassword = pass; db.config.userName = name; db.config.userSchool = "Sekolah Saya";
+            const waLokal = normalWa((document.getElementById('regWa') || {}).value); if (waLokal) db.config.waGuru = waLokal;
             syncDB(); localStorage.setItem('agendaGuru_isLogged', 'true');
             Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Akun berhasil dibuat!', timer: 1500, showConfirmButton: false });
             showApp();
@@ -733,6 +734,10 @@ window.AGENDA_GURU_LOADED = true;
             const lisensiEl = document.getElementById('regLicense');
             const licenseKey = normalizeLicenseKey(lisensiEl ? lisensiEl.value : '');
             if (!LICENSE_KEY_RE.test(licenseKey)) { setAuthBusy(false); return Swal.fire('Kode Lisensi', 'Masukkan kode lisensi dari penjual (format AG-XXXX-XXXX-XXXX).', 'warning'); }
+            const waEl = document.getElementById('regWa');
+            const waDaftar = normalWa(waEl ? waEl.value : '');
+            if (waEl && !waDaftar) { setAuthBusy(false); return Swal.fire('Nomor WhatsApp', 'Masukkan nomor WhatsApp yang aktif, contoh: 0812-3456-7890.', 'warning'); }
+            try { if (waDaftar) localStorage.setItem(WA_DAFTAR_KEY, waDaftar); } catch (e) { }
             google.script.run.withSuccessHandler(onResult).withFailureHandler(onFail).registerAccount(name, email, pass, licenseKey);
         }
     }
@@ -895,6 +900,7 @@ window.AGENDA_GURU_LOADED = true;
         if (window.AGENDA_DEMO) tampilkanBannerDemo();
         else {
             setTimeout(() => cekPembaruanCodeGs(0), 1000); // pembaruan penting didahulukan dari ajakan instal
+            setTimeout(() => prosesWaGuru(0), 9000); // nomor WA untuk kabar pembaruan (sekali, bisa ditunda)
             setTimeout(() => tawarkanInstalAplikasi(MINTA_INSTAL), MINTA_INSTAL ? 800 : 2500);
         }
         setTimeout(() => mulaiTurOtomatis(0), MINTA_INSTAL ? 2500 : 900); // tur pengguna baru; ajakan instal menunggu tur selesai
@@ -1224,6 +1230,67 @@ window.AGENDA_GURU_LOADED = true;
         }).then(r => {
             if (r.isConfirmed) window.open(LINK_PANDUAN_UPDATE, '_blank', 'noopener');
             try { localStorage.setItem(UPDATE_NANTI_KEY, JSON.stringify({ versi: VERSI_CODEGS_TERBARU, at: Date.now() })); } catch (e) { }
+        });
+    }
+
+    // --- Nomor WhatsApp guru: dicatat di Spreadsheet Lisensi penjual untuk kabar pembaruan ---
+    // Dikirim langsung ke server lisensi bersama izin lisensi bertanda tangan (bukan lewat Code.gs),
+    // jadi berlaku juga untuk pengguna Code.gs lama.
+    const WA_LISENSI_URL = 'https://script.google.com/macros/s/AKfycbzXOjkGaErlPIyjOrQmAXE01O4XN9kDnGwVAvUdR6HTwguAGtdtzB-eFTNoNdpNca7qaQ/exec';
+    const WA_DAFTAR_KEY = 'agendaGuru_waDaftar', WA_NANTI_KEY = 'agendaGuru_waNanti';
+
+    function normalWa(v) {
+        let d = String(v || '').replace(/\D/g, '');
+        if (d.startsWith('0')) d = '62' + d.slice(1); else if (d.startsWith('8')) d = '62' + d;
+        return /^62\d{8,13}$/.test(d) ? d : '';
+    }
+    function tampilNomorWa(wa) { wa = normalWa(wa); return wa ? '0' + wa.slice(2) : ''; }
+
+    function kirimWaLisensi() {
+        if (!IS_GAS || window.AGENDA_DEMO || !db || !db.config) return;
+        const wa = normalWa(db.config.waGuru);
+        if (!wa || db.config.waTerkirim === wa) return;
+        let lic = null;
+        try { lic = JSON.parse(localStorage.getItem(LICENSE_CACHE_KEY) || 'null'); } catch (e) { }
+        if (!lic || !lic.payload || !lic.sig) return;
+        fetch(WA_LISENSI_URL, {
+            method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'kontak', payload: lic.payload, sig: lic.sig, wa: wa })
+        }).then(r => r.json()).then(j => {
+            if (j && j.ok) { db.config.waTerkirim = wa; syncDB(); }
+        }).catch(() => { }); // gagal kirim: dicoba lagi saat aplikasi dibuka berikutnya
+    }
+
+    function prosesWaGuru(percobaan) {
+        if (!IS_GAS || window.AGENDA_DEMO || !db || !db.config) return;
+        let dariDaftar = '';
+        try { dariDaftar = localStorage.getItem(WA_DAFTAR_KEY) || ''; } catch (e) { }
+        if (dariDaftar) {
+            try { localStorage.removeItem(WA_DAFTAR_KEY); } catch (e) { }
+            if (!db.config.waGuru) { db.config.waGuru = dariDaftar; syncDB(); }
+        }
+        if (db.config.waGuru) return kirimWaLisensi();
+        try { if (Date.now() - Number(localStorage.getItem(WA_NANTI_KEY) || 0) < 7 * 864e5) return; } catch (e) { } // ditunda 7 hari
+        if (typeof Swal === 'undefined') return;
+        if (Swal.isVisible() || turAktif()) { if ((percobaan || 0) < 24) setTimeout(() => prosesWaGuru((percobaan || 0) + 1), 5000); return; }
+        mintaNomorWa();
+    }
+
+    function mintaNomorWa() {
+        Swal.fire({
+            title: 'Nomor WhatsApp Anda',
+            html: '<p class="mb-0 small">Agar Anda mendapat kabar <b>pembaruan AgendaGuru</b> dan bantuan dari penjual lewat WhatsApp. Nomor hanya dipakai untuk itu.</p>',
+            input: 'tel', inputPlaceholder: 'Contoh: 0812-3456-7890',
+            inputAttributes: { inputmode: 'tel', autocomplete: 'tel', 'aria-label': 'Nomor WhatsApp' },
+            showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Nanti saja', reverseButtons: true,
+            preConfirm: v => { const wa = normalWa(v); if (!wa) { Swal.showValidationMessage('Nomor belum benar. Contoh: 0812-3456-7890'); return false; } return wa; }
+        }).then(r => {
+            if (r.isConfirmed) {
+                db.config.waGuru = r.value; syncDB(); kirimWaLisensi();
+                Swal.fire({ icon: 'success', title: 'Tersimpan', text: 'Terima kasih! Nomor bisa diubah kapan saja di Profil.', timer: 1800, showConfirmButton: false });
+            } else {
+                try { localStorage.setItem(WA_NANTI_KEY, String(Date.now())); } catch (e) { }
+            }
         });
     }
 
@@ -7866,6 +7933,7 @@ window.AGENDA_GURU_LOADED = true;
 
     function openProfileModal() {
         document.getElementById('prof-name').value = db.config.userName || ''; document.getElementById('prof-school').value = db.config.userSchool || '';
+        const profWa = document.getElementById('prof-wa'); if (profWa) profWa.value = tampilNomorWa(db.config.waGuru);
         document.getElementById('modal-prof-img').src = db.config.userPhoto || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(db.config.userName) + '&background=172B4D&color=fff');
         tempPhotoBase64 = db.config.userPhoto || ""; document.getElementById('prof-photo-file').value = "";
         let modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalProfile'));
@@ -7887,9 +7955,13 @@ window.AGENDA_GURU_LOADED = true;
     }
 
     function saveProfile() {
+        const profWa = document.getElementById('prof-wa');
+        const waBaru = profWa ? profWa.value.trim() : '';
+        if (waBaru && !normalWa(waBaru)) return Swal.fire('Nomor WhatsApp', 'Nomor belum benar. Contoh: 0812-3456-7890.', 'warning');
+        if (profWa) db.config.waGuru = normalWa(waBaru);
         db.config.userName = document.getElementById('prof-name').value || 'Guru'; db.config.userSchool = document.getElementById('prof-school').value || 'Sekolah';
         if (tempPhotoBase64) db.config.userPhoto = tempPhotoBase64;
-        syncDB(); updateProfileUI(); closeModal('modalProfile'); Swal.fire('Tersimpan', 'Profil diperbarui!', 'success');
+        syncDB(); updateProfileUI(); closeModal('modalProfile'); kirimWaLisensi(); Swal.fire('Tersimpan', 'Profil diperbarui!', 'success');
     }
 
     // --- Schedule / Jadwal ---
