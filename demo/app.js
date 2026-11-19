@@ -2632,10 +2632,10 @@ window.AGENDA_GURU_LOADED = true;
         const harian = ctx.jenis === 'Formatif';
         if (!harian) nilaiMode = 'input';
         document.getElementById('nilai-tabs').style.display = harian ? '' : 'none';
-        document.getElementById('nilai-tab-input').classList.toggle('active', nilaiMode === 'input');
-        document.getElementById('nilai-tab-rekap').classList.toggle('active', nilaiMode === 'rekap');
-        document.getElementById('nilai-tab-input').setAttribute('aria-selected', nilaiMode === 'input');
-        document.getElementById('nilai-tab-rekap').setAttribute('aria-selected', nilaiMode === 'rekap');
+        ['input', 'banyak', 'rekap'].forEach(md => {
+            const t = document.getElementById('nilai-tab-' + md); if (!t) return;
+            t.classList.toggle('active', nilaiMode === md); t.setAttribute('aria-selected', nilaiMode === md);
+        });
         if (!ctx.cid || !ctx.mapel) {
             container.innerHTML = '<div class="alert alert-secondary text-center mb-0">Silakan pilih Kelas dan Mata Pelajaran.</div>';
             return;
@@ -2646,6 +2646,7 @@ window.AGENDA_GURU_LOADED = true;
         }
         if (!harian) renderNilaiSumatif(ctx);
         else if (nilaiMode === 'rekap') renderNilaiRekap(ctx);
+        else if (nilaiMode === 'banyak') renderNilaiBanyak(ctx);
         else renderNilaiHarian(ctx);
         calculateStatsNilai(true);
     }
@@ -2782,6 +2783,181 @@ window.AGENDA_GURU_LOADED = true;
             html += `<td class="ag-stick-r ag-total${avg !== null && avg < kkm ? ' t-A' : ''}">${avg === null ? '-' : avg.toFixed(1).replace('.', ',')}</td></tr>`;
         });
         box.innerHTML = html + '</tbody></table></div>';
+    }
+
+    // =====================================================================
+    // ISI BANYAK — tabel siswa × penilaian satu semester untuk memindahkan nilai dari buku nilai.
+    // Bisa diketik langsung atau ditempel satu blok angka dari Excel/Google Sheets.
+    // Struktur data tetap sama (per bulan); tabel ini hanya cara lain mengisinya.
+    // =====================================================================
+    let nilaiGridTambahBuka = false, nilaiGridTgl = '';
+    function nilaiGridNorm(v) { return String(v == null ? '' : v).trim().replace(',', '.'); }
+    function nilaiGridKelas(v, kkm) {
+        if (!agIsiNilai(v)) return '';
+        const n = Number(nilaiGridNorm(v));
+        return (isNaN(n) || n < 0 || n > 100 || n < kkm) ? 'is-rendah' : '';
+    }
+    function nilaiGridRataTeks(vals) {
+        const nums = vals.filter(agIsiNilai).map(v => Number(nilaiGridNorm(v))).filter(n => !isNaN(n));
+        return nums.length ? { teks: (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1).replace('.', ','), rendah: nums.reduce((a, b) => a + b, 0) / nums.length < nilaiKKM() } : { teks: '-', rendah: false };
+    }
+
+    function renderNilaiBanyak(ctx) {
+        const box = document.getElementById('container-table-nilai'), daftar = nilaiDaftar(ctx), stds = absenSiswa(ctx.cid), kkm = nilaiKKM();
+        let html = `<div class="ag-tabelinfo"><b>Untuk memindahkan nilai dari buku nilai.</b> Tambahkan satu kolom untuk setiap penilaian, lalu ketik nilainya.
+            Sudah ada di Excel/Google Sheets? Blok angkanya saja, salin (<kbd>Ctrl</kbd>+<kbd>C</kbd>), klik sel pertama di tabel ini, lalu tempel (<kbd>Ctrl</kbd>+<kbd>V</kbd>).
+            <kbd>Enter</kbd> turun ke siswa berikutnya, tombol panah berpindah sel. Nilai tersimpan otomatis.</div>`;
+        if (nilaiGridTambahBuka || !daftar.length) {
+            html += `<div class="ag-gridbar"><div class="ag-newform">
+                <div class="ag-newform-title">${daftar.length ? 'Tambah kolom penilaian' : 'Belum ada penilaian harian di semester ini. Tambahkan kolom pertama:'}</div>
+                <label>Tanggal penilaian<input type="date" id="nilai-grid-tgl" value="${nilaiGridTgl || agTglHariIni()}"></label>
+                <label class="ag-grow">Materi / tujuan pembelajaran<input type="text" id="nilai-grid-materi" placeholder="Contoh: PH 1 – Pecahan" onkeydown="if(event.key==='Enter'){event.preventDefault();nilaiGridTambah();}"></label>
+                <button type="button" class="ag-btn ag-btn-primary" onclick="nilaiGridTambah()"><i class="bi bi-plus-lg"></i> Tambah kolom</button>
+                ${daftar.length ? '<button type="button" class="ag-btn" onclick="nilaiGridToggleTambah()">Tutup</button>' : ''}
+            </div></div>`;
+        } else {
+            html += `<div class="ag-gridbar">
+                <button type="button" class="ag-btn ag-btn-new" onclick="nilaiGridToggleTambah()"><i class="bi bi-plus-lg"></i> Tambah kolom penilaian</button>
+                <div class="ag-legend"><span><span class="ag-cellmini b-rendah"></span>Di bawah KKM ${kkm} atau bukan 0–100</span>
+                <label class="ag-fill">KKM <input type="number" id="input-kkm" value="${kkm}" min="0" max="100" class="ag-numin ag-numin-sm" aria-label="KKM" onchange="nilaiUbahKKM(this.value)"></label></div>
+            </div>`;
+        }
+        if (!daftar.length) { box.innerHTML = html; return; }
+
+        const recs = {}; daftar.forEach(a => { if (!recs[a.m]) recs[a.m] = nilaiBaca(nilaiRecHarian(ctx, a.m)); });
+        html += `<div class="ag-tablewrap" id="nilai-grid-wrap"><table class="ag-table"><thead><tr><th scope="col" class="ag-stick-l">Nama siswa</th>`;
+        daftar.forEach(a => {
+            html += `<th scope="col"><button type="button" class="ag-colhead" onclick="nilaiPilihKe('${a.m}', ${a.i}); nilaiSetMode('input')" title="Buka untuk mengubah tanggal/materi atau menghapus">
+                <small>${escapeHtml(agTglPendek(a.tgl))}</small><b>${escapeHtml(a.judul)}</b></button></th>`;
+        });
+        html += `<th scope="col" class="ag-addcol"><button type="button" class="ag-btn ag-btn-new" onclick="nilaiGridToggleTambah(true)"><i class="bi bi-plus-lg"></i> Kolom</button></th>
+            <th scope="col" class="ag-stick-r">Rata-rata</th></tr></thead><tbody>`;
+        stds.forEach((s, r) => {
+            const sid = escapeHtml(s.StudentID), vals = [];
+            html += `<tr><th scope="row" class="ag-stick-l"><span class="ag-gridno">${r + 1}</span>${escapeHtml(s.StudentName)}</th>`;
+            daftar.forEach((a, c) => {
+                const v = (recs[a.m].grades[s.StudentID] || [])[a.i], isi = agIsiNilai(v); vals.push(v);
+                html += `<td><input class="ag-gridin ${nilaiGridKelas(v, kkm)}" type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off"
+                    value="${isi ? escapeHtml(v) : ''}" data-sid="${sid}" data-m="${a.m}" data-i="${a.i}" data-r="${r}" data-c="${c}"
+                    aria-label="Nilai ${escapeHtml(s.StudentName)}, ${escapeHtml(a.judul)}"
+                    oninput="nilaiGridInput(this)" onkeydown="nilaiGridKey(event)" onpaste="nilaiGridTempel(event)" onfocus="this.select()"></td>`;
+            });
+            const rt = nilaiGridRataTeks(vals);
+            html += `<td></td><td class="ag-stick-r ag-total${rt.rendah ? ' t-A' : ''}" data-avg-for="${sid}">${rt.teks}</td></tr>`;
+        });
+        box.innerHTML = html + '</tbody></table></div>';
+    }
+
+    function nilaiGridToggleTambah(buka) {
+        nilaiGridTambahBuka = buka === undefined ? !nilaiGridTambahBuka : !!buka;
+        loadNilaiData();
+        if (nilaiGridTambahBuka) { const el = document.getElementById('nilai-grid-materi'); el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.focus(); }
+    }
+
+    async function nilaiGridTambah() {
+        const tgl = document.getElementById('nilai-grid-tgl')?.value, materi = (document.getElementById('nilai-grid-materi')?.value || '').trim();
+        if (!tgl) return Swal.fire('Tanggal belum diisi', 'Pilih tanggal penilaian. Jika tanggal pastinya tidak tercatat di buku nilai, pilih tanggal kira-kira di bulan yang sama.', 'warning');
+        const sama = nilaiDaftar(Object.assign({}, nilaiCtx(), { sem: semesterDariTanggal(tgl) }))
+            .find(a => a.tgl === tgl && a.materi.trim().toLowerCase() === materi.toLowerCase());
+        if (sama) {
+            const r = await Swal.fire({
+                icon: 'question', title: 'Kolom ini sudah ada',
+                html: `Sudah ada penilaian <b>${escapeHtml(formatTanggalIndo(tgl))}</b>${materi ? ' dengan materi <b>' + escapeHtml(materi) + '</b>' : ' tanpa materi'}. Tetap tambah kolom baru?`,
+                showCancelButton: true, confirmButtonText: 'Tetap tambah', cancelButtonText: 'Batal'
+            });
+            if (!r.isConfirmed) return;
+        }
+        nilaiCekSemester(tgl);
+        const pos = nilaiSisipKolom(nilaiCtx(), tgl, materi, {});
+        nilaiGridTgl = tgl; nilaiGridTambahBuka = true;
+        syncDB(); loadNilaiData();
+        const kolom = [...document.querySelectorAll(`#container-table-nilai .ag-gridin[data-m="${pos.m}"][data-i="${pos.i}"]`)];
+        kolom.forEach(el => el.classList.add('is-baru'));
+        if (kolom[0]) { kolom[0].scrollIntoView({ block: 'nearest', inline: 'center' }); kolom[0].focus(); }
+        warnTapelMismatch('nilai', tgl);
+    }
+
+    // Tulis isi beberapa sel sekaligus, dikelompokkan per rekaman bulan.
+    function nilaiGridSimpan(els) {
+        const ctx = nilaiCtx(), per = {};
+        els.forEach(el => { (per[el.dataset.m] = per[el.dataset.m] || []).push(el); });
+        Object.keys(per).forEach(m => {
+            const rec = nilaiRecHarian(ctx, m); if (!rec) return;
+            const d = nilaiBaca(rec);
+            per[m].forEach(el => {
+                const sid = el.dataset.sid, i = Number(el.dataset.i), row = Array.isArray(d.grades[sid]) ? d.grades[sid] : [];
+                while (row.length < d.dates.length) row.push('');
+                row[i] = nilaiGridNorm(el.value); d.grades[sid] = row;
+            });
+            nilaiTulis(rec, d);
+        });
+    }
+    function nilaiGridSegarkan(els) {
+        const kkm = nilaiKKM(), sids = new Set();
+        els.forEach(el => {
+            el.classList.remove('is-rendah'); const k = nilaiGridKelas(el.value, kkm); if (k) el.classList.add(k);
+            sids.add(el.dataset.sid);
+        });
+        sids.forEach(sid => {
+            const cell = document.querySelector(`#container-table-nilai [data-avg-for="${CSS.escape(sid)}"]`); if (!cell) return;
+            const rt = nilaiGridRataTeks([...document.querySelectorAll(`#container-table-nilai .ag-gridin[data-sid="${CSS.escape(sid)}"]`)].map(i => i.value));
+            cell.textContent = rt.teks; cell.classList.toggle('t-A', rt.rendah);
+        });
+    }
+    function nilaiGridInput(el) { nilaiGridSimpan([el]); nilaiGridSegarkan([el]); nilaiSimpanNanti(); }
+    function nilaiGridSel(r, c) { return document.querySelector(`#container-table-nilai .ag-gridin[data-r="${r}"][data-c="${c}"]`); }
+    function nilaiGridKey(e) {
+        const el = e.target, r = Number(el.dataset.r), c = Number(el.dataset.c);
+        let t = null;
+        if (e.key === 'Enter') {
+            // Enter turun; di siswa terakhir pindah ke siswa pertama kolom berikutnya
+            t = e.shiftKey ? nilaiGridSel(r - 1, c) : (nilaiGridSel(r + 1, c) || nilaiGridSel(0, c + 1));
+            if (!t) { e.preventDefault(); el.blur(); return; }
+        }
+        else if (e.key === 'ArrowDown') t = nilaiGridSel(r + 1, c);
+        else if (e.key === 'ArrowUp') t = nilaiGridSel(r - 1, c);
+        else if (e.key === 'ArrowRight' && el.selectionEnd === el.value.length) t = nilaiGridSel(r, c + 1);
+        else if (e.key === 'ArrowLeft' && el.selectionStart === 0) t = nilaiGridSel(r, c - 1);
+        else return;
+        e.preventDefault();
+        if (t) { t.focus(); t.select(); }
+    }
+    // Tempel blok dari Excel/Sheets: baris dipisah baris baru, kolom dipisah Tab.
+    function nilaiGridTempel(e) {
+        const el = e.target, teks = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+        let baris = teks.replace(/\r/g, '').replace(/\n+$/, '').split('\n').map(b => b.split('\t'));
+        e.preventDefault();
+        if (baris.length === 1 && baris[0].length === 1) { el.value = nilaiGridNorm(baris[0][0]); nilaiGridInput(el); return; }
+        const angka = v => { const s = nilaiGridNorm(v); return s !== '' && !isNaN(Number(s)); };
+        const catatan = [];
+        // Baris judul (tanpa angka sama sekali) dan kolom nama siswa ikut tersalin: abaikan.
+        if (baris.length > 1 && !baris[0].some(angka)) { baris = baris.slice(1); catatan.push('Baris judul diabaikan.'); }
+        if (baris.length && baris.every(b => b.length > 1 && String(b[0]).trim() !== '' && !angka(b[0]))) {
+            baris = baris.map(b => b.slice(1)); catatan.push('Kolom nama siswa diabaikan.');
+        }
+        const r0 = Number(el.dataset.r), c0 = Number(el.dataset.c), ubah = [];
+        let luar = 0, bukan = 0;
+        baris.forEach((cells, dr) => cells.forEach((raw, dc) => {
+            const v = nilaiGridNorm(raw); if (v === '') return;
+            const t = nilaiGridSel(r0 + dr, c0 + dc);
+            if (!t) { luar++; return; }
+            if (!angka(v)) { bukan++; return; }
+            t.value = v; ubah.push(t);
+        }));
+        if (ubah.length) {
+            nilaiGridSimpan(ubah); nilaiGridSegarkan(ubah);
+            ubah.forEach(t => { t.classList.remove('is-baru'); void t.offsetWidth; t.classList.add('is-baru'); });
+            clearTimeout(nilaiSimpanTimer); nilaiSimpanTimer = null; syncDB();
+        }
+        const jmlKolom = Math.max(0, ...baris.map(b => b.length));
+        if (luar) catatan.push(`${luar} nilai tidak muat karena tabel kurang ${nilaiGridSel(0, c0 + jmlKolom - 1) ? 'baris (jumlah siswa lebih sedikit)' : 'kolom — tambahkan kolom penilaian dulu, lalu tempel lagi'}.`);
+        if (bukan) catatan.push(`${bukan} sel bukan angka dilewati.`);
+        Swal.fire({
+            icon: ubah.length ? (luar ? 'warning' : 'success') : 'warning',
+            title: ubah.length ? `${ubah.length} nilai ditempel` : 'Tidak ada nilai yang ditempel',
+            html: (catatan.length ? catatan.map(escapeHtml).join('<br>') + '<br>' : '') + (ubah.length ? '<small>Periksa sekilas: urutan siswa di Excel harus sama dengan urutan di tabel ini.</small>' : ''),
+            confirmButtonText: 'OK'
+        });
     }
 
     function nilaiGeser(n) {
@@ -2953,6 +3129,8 @@ window.AGENDA_GURU_LOADED = true;
     // Saat KKM diubah: perbarui label Tuntas/Remedial tanpa menggambar ulang.
     function nilaiSegarkanSemuaBadge() {
         document.querySelectorAll('#container-table-nilai .ag-numin[data-sid]').forEach(nilaiSegarkanBaris);
+        const grid = [...document.querySelectorAll('#container-table-nilai .ag-gridin')];
+        if (grid.length) nilaiGridSegarkan(grid);
         nilaiSegarkanRingkas();
     }
 

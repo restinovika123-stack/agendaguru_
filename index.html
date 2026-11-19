@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgendaGuru - Manajemen Kelas Digital</title>
-    <script src="api.js?v=20261118044943"></script>
+    <script src="api.js?v=20261119054502"></script>
 
     <script>
         // Penangkap error global.
@@ -1201,6 +1201,18 @@
         .ag-namecell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .ag-wa-mini { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 8px; border: 1px solid #CFE7DA; background: #FFFFFF; color: var(--status-success); padding: 0; }
         .ag-total { font-weight: 700; }
+        /* Isi Banyak: tabel nilai yang bisa diketik & ditempel dari Excel */
+        .ag-gridin { width: 58px; height: 36px; border: 1px solid #D5DBE5; border-radius: 8px; text-align: center; font-size: 0.9rem; font-weight: 700; color: var(--navy-deep); background: #FFFFFF; padding: 0 4px; }
+        .ag-gridin:focus { outline: none; border-color: var(--teal-accent); box-shadow: 0 0 0 3px rgba(21, 154, 156, .25); }
+        .ag-gridin.is-rendah { border-color: var(--status-danger); color: #A33A3A; background: #FFF6F6; }
+        .ag-gridin.is-baru { animation: agGridBaru 1.4s ease-out; }
+        @keyframes agGridBaru { from { background: #D9F3F4; } to { background: #FFFFFF; } }
+        .ag-table .ag-gridno { color: #6B7488; font-weight: 600; margin-right: 6px; }
+        .ag-table .ag-addcol { min-width: 120px; vertical-align: middle; }
+        .ag-gridbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+        .ag-gridbar .ag-newform { flex: 1 1 100%; }
+        .ag-tabelinfo { font-size: 0.8125rem; color: #4A5468; background: #F6F8FB; border: 1px solid #E3E8F0; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+        .ag-tabelinfo kbd { background: #FFFFFF; color: var(--navy-deep); border: 1px solid #C9D1DD; font-weight: 700; font-size: 0.75rem; }
         .t-H { color: #17603F; } .t-S { color: #234A75; } .t-I { color: #6E470D; } .t-A { color: #A33A3A; }
 
         @media (max-width: 767.98px) {
@@ -1230,6 +1242,8 @@
             .ag-badge-lg { display: none; }
             .ag-badge-sm { display: table; margin-top: 3px; padding: 2px 8px; font-size: 0.7rem; }
             .ag-numin { width: 76px; height: 48px; font-size: 1.15rem; }
+            .ag-gridin { width: 52px; height: 42px; font-size: 1rem; }
+            .ag-tab { font-size: 0.82rem; padding: 9px 4px; }
             .ag-nav-title { font-size: 1rem; }
             .ag-hint { display: none; }
         }
@@ -1981,6 +1995,7 @@
                             <div class="card-body">
                                 <div class="ag-tabs" role="tablist" aria-label="Tampilan nilai" id="nilai-tabs">
                                     <button type="button" role="tab" class="ag-tab active" id="nilai-tab-input" onclick="nilaiSetMode('input')">Input per Penilaian</button>
+                                    <button type="button" role="tab" class="ag-tab" id="nilai-tab-banyak" onclick="nilaiSetMode('banyak')">Isi Banyak</button>
                                     <button type="button" role="tab" class="ag-tab" id="nilai-tab-rekap" onclick="nilaiSetMode('rekap')">Rekap Nilai</button>
                                 </div>
                                 <div id="container-table-nilai" class="ag-panel">
@@ -3312,7 +3327,7 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="app.js?v=20261118044943"></script>
+    <script src="app.js?v=20261119054502"></script>
     
 </body>
 
